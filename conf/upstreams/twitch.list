@@ -1,0 +1,13 @@
+# Twitch 页面上游（conf/upstreams/twitch.list）
+#
+# *.twitch.tv 在 Fastly 上：带真实 SNI 会被 RST，不发 SNI、带正确的 Host 反而能拿到
+# 真实内容（实测 www/m/gql/auth/clips/dashboard 全部 200）。
+#
+# 下面地址按探测报告给出的"无 SNI 实测可用"列表，Fastly 任播段。
+
+server 151.101.194.214:443  max_fails=2 fail_timeout=15s;
+server 151.101.2.214:443    max_fails=2 fail_timeout=15s;
+server 151.101.66.214:443   max_fails=2 fail_timeout=15s;
+server 151.101.130.214:443  max_fails=2 fail_timeout=15s;
+server 140.248.166.167:443  max_fails=2 fail_timeout=15s;
+server 140.248.130.167:443  max_fails=2 fail_timeout=15s;

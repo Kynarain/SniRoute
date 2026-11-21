@@ -1,0 +1,25 @@
+# pixiv 主站上游：Cloudflare 边缘
+#
+# 重要结论（2026-11-18 实测）：
+#   www.pixiv.net 的真实解析指向 Cloudflare（doh.pub 给出 104.18.42.239 /
+#   172.64.145.17）。之前那批 210.140.139.x 是 pixiv 的**老源站**，直连它会得到
+#   301/403 —— 因为源站的默认 vhost 不是对外站点。
+#
+#   而对 CF 边缘：发 SNI=www.pixiv.net 可以正常握手、证书校验通过。
+#   这说明"SNI 被墙"只针对旧源站 IP，不是针对域名本身。
+#
+#   所以本文件的上游必须是 CF 边缘，且站点配置里必须
+#   proxy_ssl_server_name on —— 没有 SNI，CF 无法判断该把请求送到哪个站点。
+#
+# 注意：CF 边缘 IP 会变，且不同地区可达性不同。
+#   用 `python scripts/sniroute.py discover --site pixiv --method doh` 重新取。
+#
+# 探测方式：本文件里的地址应当用 `probe --mode sni` 验证（必须发 SNI），
+# 用默认的自动模式会误判 —— 那正是最初踩的坑。
+
+server 104.18.42.239:443  max_fails=2 fail_timeout=15s;
+server 172.64.145.17:443  max_fails=2 fail_timeout=15s;
+server 104.18.42.163:443  max_fails=2 fail_timeout=15s;
+server 172.64.145.93:443  max_fails=2 fail_timeout=15s;
+server 104.16.124.96:443  max_fails=2 fail_timeout=15s;
+server 104.16.123.96:443  max_fails=2 fail_timeout=15s;

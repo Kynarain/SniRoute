@@ -1,0 +1,13 @@
+# mega 上游（conf/upstreams/mega.list）
+#
+# 31.216.144.5 / 31.216.145.5：无 SNI 返回真实 MEGA 首页 2525 字节
+# 注意：这两台边缘 TLS 握手 9-12 秒，连接超时必须放宽
+#
+# 地址会变。失效时用：scripts\sniroute.py site <域名>
+
+server 31.216.144.5:443  max_fails=2 fail_timeout=15s;
+server 31.216.145.5:443  max_fails=2 fail_timeout=15s;
+
+# mega.io 的前端（MEGA 新版页面会跳到这个域名，不覆盖会出现 ERR_CONNECTION_CLOSED）
+server 66.203.127.23:443  max_fails=2 fail_timeout=15s;
+server 66.203.124.37:443  max_fails=2 fail_timeout=15s;

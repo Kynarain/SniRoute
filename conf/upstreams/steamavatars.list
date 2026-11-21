@@ -1,0 +1,16 @@
+# Steam 头像上游（conf/upstreams/steamavatars.list）
+#
+# avatars.steamstatic.com 与它的兄弟域名行为不同：
+#   · 带真实 SNI 的连接 8/8 被重置（同一 IP 换成 cdn.steamstatic.com 的 SNI 立刻 200，
+#     说明屏蔽规则针对的是这个 SNI 字符串本身）
+#   · 不发 SNI、但带 Host: avatars.steamstatic.com，能拿到真实头像对象（200 image/jpeg）
+#
+# 所以它必须单独走 loopback（本机终结 TLS、上游不发 SNI），不能跟着 steamstatic.com
+# 一起用 dns 模式 —— 那样会发真 SNI，直接被重置。
+#
+# 下面四个地址按实测稳定性排序，每个试 2 次全成功。
+
+server 140.248.167.52:443  max_fails=2 fail_timeout=15s;
+server 146.75.47.52:443    max_fails=2 fail_timeout=15s;
+server 199.232.163.52:443  max_fails=2 fail_timeout=15s;
+server 140.248.131.52:443  max_fails=2 fail_timeout=15s;

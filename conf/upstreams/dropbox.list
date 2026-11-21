@@ -1,0 +1,9 @@
+# dropbox 上游（conf/upstreams/dropbox.list）
+#
+# 162.125.85.18：www.dropbox.com 无 SNI -> 200 真实首页 16-24KB
+# 162.125.248.18：dropbox.com 无 SNI -> 301 跳 www
+#
+# 地址会变。失效时用：scripts\sniroute.py site <域名>
+
+server 162.125.85.18:443  max_fails=2 fail_timeout=15s;
+server 162.125.248.18:443  max_fails=2 fail_timeout=15s;

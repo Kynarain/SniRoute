@@ -1,0 +1,111 @@
+THIRD-PARTY LICENSES
+====================
+
+sniroute itself is licensed under GPL-3.0-only; the full text is in LICENSE.
+
+This document lists every third-party component that ships inside the installer
+or the portable ZIP, and then reproduces each one's license text IN FULL at the
+end. The appendices are not summaries - they are the verbatim license texts, so
+this single file is self-contained and can be read without opening anything else.
+
+Why so many components for one small tool: the tool is a thin orchestrator. It
+runs a Python DoH server, a nginx TLS front end and an OpenSSL certificate
+toolchain, each as a separate process. Those runtimes carry their own
+dependencies (OpenSSL inside Python, PCRE2 and zlib inside nginx.exe, and so on),
+and each one has licensing terms attached. Listing them is the honest option.
+
+
+--------------------------------------------------------------------------------
+Components at a glance
+--------------------------------------------------------------------------------
+
+  Component            Version    License              Shipped as
+  -------------------  ---------  -------------------  --------------------------
+  CPython              3.12.14    PSF-2.0              python\              (33.6 MB)
+  OpenSSL (python's)   3.5.8      Apache-2.0           python\DLLs\libssl-*.dll
+  OpenSSL (standalone) 3.2.1      Apache-2.0           openssl\mingw64\      (7.0 MB)
+  nginx                1.31.8     BSD-2-Clause         nginx\nginx.exe       (6.3 MB)
+  PCRE2                via nginx  BSD-3-Clause         static inside nginx.exe
+  zlib                 via nginx  zlib license         static inside nginx.exe
+  libffi               3.4.x      MIT                  python\DLLs\libffi-8.dll
+  expat                2.6.x      MIT                  python\DLLs\pyexpat.pyd
+  SQLite               3.x        Public domain        python\DLLs\sqlite3.dll
+  Tcl/Tk               8.6        Tcl/Tk license       python\DLLs\tcl86t.dll,
+                                                       tk86t.dll
+  Microsoft VC++ CRT   14.x       MS redistributable   python\vcruntime*.dll
+
+  The full text of each follows in the appendices below. The same texts are also
+  kept as individual files under licenses\ for anyone who prefers separate files.
+
+  Third-party runtimes account for roughly 47 MB of the ~47.6 MB install.
+  sniroute's own code is the 480 KB Sniroute.exe plus a few scripts.
+
+
+--------------------------------------------------------------------------------
+How these components are used
+--------------------------------------------------------------------------------
+
+  CPython          runs tools\doh_ech.py (the local DoH server) and
+                   scripts\sniroute.py (certificates, nginx control, self-tests).
+  OpenSSL          issues the local root CA and the leaf certificates; also
+                   provides TLS for the DoH endpoint and for Python's ssl module.
+  nginx            terminates TLS for the proxied host names and forwards to the
+                   upstream origin without exposing the blocked server name.
+  PCRE2 / zlib     nginx's own regex engine and compression, compiled into
+                   nginx.exe and never called by sniroute directly.
+  libffi / expat   pulled in by the Python build (ctypes, XML parsing).
+  SQLite / Tcl/Tk  part of the official Python distribution; not used by
+                   sniroute, kept because the upstream build ships them.
+  VC++ CRT         the C runtime the Python DLLs link against.
+
+  Every component runs as a separate process. None is statically linked into
+  Sniroute.exe, so any of them can be replaced with a different build without
+  rebuilding sniroute.
+
+
+--------------------------------------------------------------------------------
+Build-time tools (NOT distributed)
+--------------------------------------------------------------------------------
+
+  Zig 0.17.1          compiled gui\SnirouteTray.cpp into Sniroute.exe
+  WiX Toolset 3.14.1  built the MSI package
+  Pillow              generated gui\icon.ico and gui\icon.png
+
+  Listed for reproducibility only; they impose no terms on the shipped product.
+
+
+--------------------------------------------------------------------------------
+What is NOT bundled
+--------------------------------------------------------------------------------
+
+  * No Java runtime. The tray application is native Win32 code; the earlier
+    Java-based GUI remains in the repository as history and is not shipped.
+  * No third-party DoH client library: the DoH server uses only the Python
+    standard library.
+  * No telemetry, crash reporting or update service of any kind.
+
+
+--------------------------------------------------------------------------------
+Obligations that actually apply to this distribution
+--------------------------------------------------------------------------------
+
+  PSF-2.0     Keep the copyright notice and the license text (shipped as
+              python\LICENSE.txt and reproduced in Appendix A).
+  Apache-2.0  Keep the license, the NOTICE file and attribution. Both OpenSSL
+              copies are unmodified upstream builds; their NOTICE text is part
+              of the upstream distribution.
+  BSD-2 / BSD-3  Keep the copyright notice, the conditions and the disclaimer in
+              source or binary form; do not use the authors' names to endorse
+              derived products without permission.
+  zlib        Do not misrepresent the origin of the software; keep the notice.
+  MIT         Keep the copyright and permission notice.
+  Tcl/Tk      Keep the license text when redistributing.
+  Public domain (SQLite) - no conditions; stated for completeness.
+
+  Third-party runtimes are aggregated with sniroute, not combined into it: they
+  are separate programs invoked through their own executables.
+
+  The appendices below are generated from the files in licenses\ by
+  scripts\make-third-party-notice.ps1 - edit the source files, then regenerate.
+
+

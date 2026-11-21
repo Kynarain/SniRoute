@@ -1,0 +1,16 @@
+# Google 前端地址池（conf/upstreams/google.list）
+#
+# 为什么不是官方解析结果：google.com / www.google.com 在这里解析出来的是
+# 142.251.x.119、74.125.x.10x 这类地址，TCP 443 直接超时。可达的是
+# 142.251.x.2 这一族；它们带 SNI 会被重置，不带 SNI 能正常握手，
+# 并且按 Host 头返回真实内容（实测 302/301/200）。
+#
+# 这一族地址会变。若哪天 Google 大面积失效，用
+#   scripts\sniroute.py discover --host www.google.com
+# 或直接对 142.251.x.2 段扫一遍 443 可达性来更新本文件。
+
+server 142.251.150.2:443 max_fails=1 fail_timeout=15s;   # 实测 HTTP 302/200
+server 142.251.153.2:443 max_fails=1 fail_timeout=15s;
+server 142.251.155.2:443 max_fails=1 fail_timeout=15s;
+server 142.251.157.2:443 max_fails=1 fail_timeout=15s;
+server 142.250.198.68:443 max_fails=1 fail_timeout=15s;

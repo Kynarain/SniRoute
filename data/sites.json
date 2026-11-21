@@ -1,0 +1,945 @@
+{
+  "_comment": "站点清单。conf/、证书、hosts、probe 全部从这里读，避免同一份信息在四处各写一遍而逐渐不一致。",
+  "ca": {
+    "common_name": "Sniroute Local",
+    "organization": "Kynarain",
+    "days": 3650
+  },
+  "sites": [
+    {
+      "name": "pixiv",
+      "service": "pixiv",
+      "url": "https://www.pixiv.net/",
+      "comment": "pixiv 主站。Cloudflare 前置且按 SNI 封锁（精确 SNI 被重置），所以用 ech：本机 DoH 下发 Cloudflare 共享 ECH 配置，浏览器直接连 CF 边缘，不经过本机 nginx。图片是另一回事，见 pximg（loopback）。",
+      "enabled": true,
+      "dns_override": true,
+      "dns_mode": "ech",
+      "cert_san": [
+        "pixiv.net",
+        "*.pixiv.net"
+      ],
+      "hosts": [
+        "pixiv.net",
+        "www.pixiv.net"
+      ],
+      "probe": {
+        "hostname": "www.pixiv.net",
+        "port": 443
+      },
+      "upstream_file": "conf/upstreams/pixiv.list",
+      "candidates": [
+        "104.18.42.145",
+        "104.18.43.145",
+        "172.64.146.145",
+        "172.64.147.145",
+        "104.18.40.145"
+      ],
+      "ech_override": "auto:cloudflare",
+      "ech_fallback": "dns"
+    },
+    {
+      "name": "pximg",
+      "service": "pixiv",
+      "url": "https://www.pixiv.net/",
+      "comment": "图片站。目标不在 Cloudflare 上、发 SNI 会被切断，所以 DNS 指向本机交给 nginx（它不发 SNI）",
+      "enabled": true,
+      "dns_mode": "loopback",
+      "cert_san": [
+        "pximg.net",
+        "*.pximg.net"
+      ],
+      "hosts": [
+        "pximg.net",
+        "i.pximg.net",
+        "s.pximg.net"
+      ],
+      "probe": {
+        "hostname": "i.pximg.net",
+        "port": 443
+      },
+      "upstream_mode": "nosni",
+      "upstream_file": "conf/upstreams/pximg.list",
+      "candidates": [
+        "210.140.139.131",
+        "210.140.139.132",
+        "210.140.139.133",
+        "210.140.139.134",
+        "210.140.139.135",
+        "210.140.139.136",
+        "210.140.139.137",
+        "210.140.139.138",
+        "210.140.139.149",
+        "210.140.139.150"
+      ]
+    },
+    {
+      "name": "google",
+      "service": "google",
+      "url": "https://www.google.com/",
+      "comment": "Google。官方解析出来的地址（142.251.x.119 / 74.125.x.10x）在这里 TCP 就不通，但 142.251.x.2 这一族可达；带 SNI 握手被重置、不带 SNI 正常。所以走本机终结 + 无 SNI 转发，靠 Host 头让 Google 路由——实测各子域都返回真实响应（302/301/200）。 另含 YouTube：页面（youtube.com / youtu.be）、缩略图（i.ytimg.com）、头像与频道图（yt3.ggpht.com）、视频流（*.googlevideo.com）。实测这些域名在 142.251.x.2 这一族上都能靠 Host 头路由。",
+      "enabled": true,
+      "dns_mode": "loopback",
+      "cert_san": [
+        "google.com",
+        "*.google.com",
+        "google.com.hk",
+        "*.google.com.hk",
+        "gstatic.com",
+        "*.gstatic.com",
+        "googleapis.com",
+        "*.googleapis.com",
+        "googleusercontent.com",
+        "*.googleusercontent.com",
+        "youtube.com",
+        "*.youtube.com",
+        "ggpht.com",
+        "*.ggpht.com",
+        "ytimg.com",
+        "*.ytimg.com",
+        "youtu.be",
+        "googlevideo.com",
+        "*.googlevideo.com"
+      ],
+      "hosts": [
+        "google.com",
+        "www.google.com",
+        "accounts.google.com",
+        "mail.google.com",
+        "gemini.google.com",
+        "play.google.com",
+        "www.google.com.hk",
+        "www.gstatic.com",
+        "fonts.googleapis.com",
+        "www.googleapis.com",
+        "clientservices.googleapis.com",
+        "lh3.googleusercontent.com",
+        "www.youtube.com",
+        "i.ytimg.com",
+        "yt3.ggpht.com",
+        "youtube.com",
+        "m.youtube.com",
+        "music.youtube.com",
+        "youtu.be",
+        "ytimg.com",
+        "s.ytimg.com",
+        "googlevideo.com",
+        "manifest.googlevideo.com",
+        "redirector.googlevideo.com",
+        "images.youtube.com"
+      ],
+      "probe": {
+        "hostname": "www.google.com",
+        "port": 443
+      },
+      "upstream_mode": "nosni",
+      "upstream_file": "conf/upstreams/google.list",
+      "candidates": [
+        "142.251.150.2",
+        "142.251.153.2",
+        "142.251.155.2",
+        "142.251.157.2",
+        "142.250.198.68"
+      ]
+    },
+    {
+      "name": "github",
+      "service": "github",
+      "url": "https://github.com/",
+      "comment": "GitHub。带 SNI 的 TLS 本身没问题，问题只是 DNS 被污染（系统解析返回假地址）。所以用 dns 模式：NRPT 把域名交给我们，我们用 DoH 拿到真实地址，浏览器直连，证书仍是 GitHub 的真证书，全程不需要本机终结 TLS。",
+      "enabled": true,
+      "dns_mode": "dns",
+      "cert_san": [],
+      "hosts": [
+        "github.com",
+        "www.github.com",
+        "api.github.com",
+        "gist.github.com",
+        "codeload.github.com",
+        "objects.githubusercontent.com",
+        "avatars.githubusercontent.com",
+        "raw.githubusercontent.com"
+      ],
+      "probe": {
+        "hostname": "github.com",
+        "port": 443
+      }
+    },
+    {
+      "name": "discord",
+      "service": "discord",
+      "url": "https://discord.com/",
+      "comment": "Discord 主站与 gateway。原方案用本机代理（不发 SNI），但 Cloudflare 会回 421 Misdirected Request，所以改走共享 ECH：本机 DNS 下发 Cloudflare 的 cloudflare-ech.com 配置，浏览器自己加密 SNI。只有候选地址过少才快——候选里混入不服务该 zone 的地址会让 Chrome 反复重试，实测能拖到 200 秒。",
+      "enabled": true,
+      "dns_mode": "ech",
+      "cert_san": [
+        "discord.com",
+        "*.discord.com",
+        "discord.gg",
+        "*.discord.gg"
+      ],
+      "hosts": [
+        "discord.com",
+        "www.discord.com",
+        "gateway.discord.gg",
+        "discord.gg"
+      ],
+      "probe": {
+        "hostname": "discord.com",
+        "port": 443
+      },
+      "upstream_mode": "nosni",
+      "upstream_file": "conf/upstreams/discord.list",
+      "candidates": [
+        "162.159.138.232",
+        "162.159.137.232"
+      ],
+      "ech_override": "auto:cloudflare",
+      "ech_fallback": "AEX+DQBBagAgACDxHksgvjRz7PGcNfswHCxrM4w/vfv6xWFZZS3QqXkqQgAEAAEAAQASY2xvdWRmbGFyZS1lY2guY29tAAA="
+    },
+    {
+      "name": "discordcdn",
+      "service": "discord",
+      "url": "https://discord.com/",
+      "comment": "Discord 的 Cloudflare 部分：CDN（头像/表情/附件）与更新检查。Cloudflare 按 SNI 分区，不发 SNI 会 421，发真 SNI 会被重置，因此用 ECH：本机 DNS 下发 Cloudflare 的共享 ECH 配置（cloudflare-ech.com，现查现用），浏览器原生加密 SNI。不经过本机 nginx。",
+      "enabled": true,
+      "dns_mode": "ech",
+      "cert_san": [],
+      "hosts": [
+        "cdn.discordapp.com",
+        "media.discordapp.net",
+        "updates.discord.com"
+      ],
+      "ech_override": "auto:cloudflare",
+      "candidates": [
+        "162.159.130.233",
+        "162.159.129.233",
+        "162.159.130.232",
+        "162.159.129.232"
+      ],
+      "probe": {
+        "hostname": "cdn.discordapp.com",
+        "port": 443
+      },
+      "ech_fallback": "AEX+DQBBagAgACDxHksgvjRz7PGcNfswHCxrM4w/vfv6xWFZZS3QqXkqQgAEAAEAAQASY2xvdWRmbGFyZS1lY2guY29tAAA="
+    },
+    {
+      "name": "discorddl",
+      "service": "discord",
+      "url": "https://discord.com/",
+      "comment": "Discord 的更新下载域名。直连无解（一个在 GCP 被静默丢包、一个所在 Cloudflare zone 不支持 ECH），改由中继处理；中继未启用时会快速 502。",
+      "enabled": true,
+      "dns_mode": "loopback",
+      "cert_san": [],
+      "hosts": [
+        "stable.dl2.discordapp.net",
+        "dl.dl2.discordapp.net",
+        "dl.discordapp.net"
+      ],
+      "probe": {
+        "hostname": "stable.dl2.discordapp.net",
+        "port": 443
+      },
+      "loopback_ip": "127.0.0.1"
+    },
+    {
+      "name": "youtube",
+      "service": "youtube",
+      "url": "https://www.youtube.com/",
+      "comment": "菜单入口。YouTube 的域名实际由 google 站点统一接管（同一套上游地址池与证书），这里只登记一个可点击的入口，不重复声明 hosts，避免两处同时映射。",
+      "enabled": true,
+      "dns_mode": "loopback",
+      "cert_san": [],
+      "hosts": []
+    },
+    {
+      "name": "steam",
+      "service": "steam",
+      "url": "https://store.steampowered.com/",
+      "comment": "Steam 商店与 API。这些域名带 SNI 的 TLS 本身没问题，只是系统 DNS 常给出不可用或不匹配的地址，所以用 dns 模式：只修正解析，浏览器/客户端直连，证书仍是 Steam 的真证书。",
+      "enabled": true,
+      "dns_mode": "dns",
+      "cert_san": [],
+      "hosts": [
+        "steampowered.com",
+        "store.steampowered.com",
+        "api.steampowered.com",
+        "login.steampowered.com",
+        "help.steampowered.com",
+        "checkout.steampowered.com",
+        "steamstatic.com",
+        "akamai.steamstatic.com",
+        "cdn.akamai.steamstatic.com",
+        "shared.akamai.steamstatic.com",
+        "avatars.akamai.steamstatic.com",
+        "steamcdn-a.akamaihd.net",
+        "steamcommunity-a.akamaihd.net",
+        "steamusercontent.com",
+        "images.steamusercontent.com",
+        "steam-chat.com",
+        "steamcontent.com",
+        "community.steamstatic.com",
+        "avatars.steamstatic.com",
+        "cdn.steamstatic.com",
+        "cdn.cloudflare.steamstatic.com",
+        "store.cloudflare.steamstatic.com",
+        "community.cloudflare.steamstatic.com",
+        "steamgames.com",
+        "s.team",
+        "steam.tv"
+      ],
+      "probe": {
+        "hostname": "store.steampowered.com",
+        "port": 443
+      }
+    },
+    {
+      "name": "steamcommunity",
+      "service": "steam",
+      "url": "https://steamcommunity.com/",
+      "comment": "Steam 社区。带 SNI 的连接会被重置，不发 SNI 却能拿到完整页面，所以走本机代理（本机终结 TLS、上游不发 SNI）。",
+      "enabled": true,
+      "dns_mode": "loopback",
+      "cert_san": [
+        "steamcommunity.com",
+        "*.steamcommunity.com"
+      ],
+      "hosts": [
+        "steamcommunity.com",
+        "www.steamcommunity.com"
+      ],
+      "candidates": [
+        "104.89.103.51",
+        "23.15.140.216",
+        "23.205.151.43"
+      ],
+      "upstream_file": "conf/upstreams/steamcommunity.list",
+      "probe": {
+        "hostname": "steamcommunity.com",
+        "port": 443
+      }
+    },
+    {
+      "name": "chromebg",
+      "service": "",
+      "url": "",
+      "comment": "Chrome 的后台模型下载（优化指南）。实测它会通过代理拉 5 MB，耗时 200 秒，把所有网页的加载时间都拖长。它和页面功能无关，指到 127.0.0.2 让它立刻失败，页面就快了。",
+      "enabled": true,
+      "dns_mode": "loopback",
+      "loopback_ip": "127.0.0.2",
+      "cert_san": [],
+      "hosts": [
+        "optimizationguide-pa.googleapis.com"
+      ]
+    },
+    {
+      "name": "steamavatars",
+      "service": "steam",
+      "url": "https://store.steampowered.com/",
+      "comment": "Steam 头像。与同家族其他域名不同：带 SNI 会被重置，不发 SNI 却正常，所以单独走 loopback。必须精确声明，否则会被 steamstatic.com 的后缀匹配带进 dns 模式（那样会发真 SNI，头像全挂）。",
+      "enabled": true,
+      "dns_mode": "loopback",
+      "cert_san": [
+        "avatars.steamstatic.com"
+      ],
+      "hosts": [
+        "avatars.steamstatic.com"
+      ],
+      "upstream_file": "conf/upstreams/steamavatars.list",
+      "candidates": [
+        "140.248.167.52",
+        "146.75.47.52",
+        "199.232.163.52",
+        "140.248.131.52"
+      ],
+      "probe": {
+        "hostname": "avatars.steamstatic.com",
+        "port": 443
+      }
+    },
+    {
+      "name": "ea",
+      "service": "ea",
+      "url": "https://www.ea.com/",
+      "comment": "EA / Origin。实测没有 SNI 阻断、也没有 ECH，全部域名带真实 SNI 都能正常应答，所以用 dns 模式（只修解析）——系统 DNS 给的地址不可用是这里唯一能修的部分。已知限制：Chrome 直连部分 Akamai 边缘会报 ERR_HTTP2_PROTOCOL_ERROR（强制 h1.1 变成连接重置；用 curl 这类 schannel 客户端反而正常，本机代理转发实测 504）。这是客户端与边缘的协议协商问题，不是解析问题，DNS 层改变不了。",
+      "enabled": true,
+      "dns_mode": "dns",
+      "cert_san": [],
+      "hosts": [
+        "ea.com",
+        "www.ea.com",
+        "accounts.ea.com",
+        "signin.ea.com",
+        "api.ea.com",
+        "store.ea.com",
+        "static.ea.com",
+        "eaplay.ea.com",
+        "eaplay.com",
+        "origin.com",
+        "www.origin.com",
+        "api.origin.com",
+        "api1.origin.com",
+        "api2.origin.com",
+        "api3.origin.com",
+        "eaassets-a.akamaihd.net",
+        "origin-a.akamaihd.net"
+      ],
+      "probe": {
+        "hostname": "www.ea.com",
+        "port": 443
+      }
+    },
+    {
+      "name": "biliintl",
+      "service": "bilibili",
+      "url": "https://www.bilibili.tv/",
+      "comment": "bilibili 国际版（bilibili.tv，不是国内 bilibili.com）。实测网络层没有 SNI 阻断、没有 ECH：带真实 SNI 的 TCP/TLS/HTTP 全部正常，问题只在系统 DNS 给的地址，所以用 dns 模式。**视频仍然看不了**，但卡点不在网络层：playurl 接口返回 10003003 'The area is inaccessible'，是本机出口 IP 的地区限制，SNI/ECH 都改变不了。",
+      "enabled": true,
+      "dns_mode": "dns",
+      "cert_san": [],
+      "hosts": [
+        "bilibili.tv",
+        "www.bilibili.tv",
+        "api.bilibili.tv",
+        "data.bilibili.tv",
+        "biliintl.com",
+        "www.biliintl.com",
+        "api.biliintl.com",
+        "data.biliintl.com",
+        "p.bstarstatic.com",
+        "s1.bstarstatic.com",
+        "pic.bstarstatic.com",
+        "s1.hdslb.com",
+        "upos-sz-mirroraliov.bilivideo.com",
+        "upos-sz-mirrorcosov.bilivideo.com",
+        "upos-hz-mirrorakam.akamaized.net"
+      ],
+      "probe": {
+        "hostname": "api.bilibili.tv",
+        "port": 443
+      }
+    },
+    {
+      "name": "twitch",
+      "service": "twitch",
+      "url": "https://www.twitch.tv/",
+      "comment": "Twitch 页面与 gateway。*.twitch.tv 在 Fastly 上，带真实 SNI 会被重置，不发 SNI 反而返回真实内容（实测 www/m/gql/auth/clips/dashboard 全部 200 真数据），所以走 loopback：本机终结 TLS、上游不发 SNI。",
+      "enabled": true,
+      "dns_mode": "loopback",
+      "cert_san": [
+        "twitch.tv",
+        "*.twitch.tv"
+      ],
+      "hosts": [
+        "twitch.tv",
+        "www.twitch.tv",
+        "m.twitch.tv",
+        "gql.twitch.tv",
+        "clips.twitch.tv",
+        "dashboard.twitch.tv",
+        "player.twitch.tv",
+        "auth.twitch.tv",
+        "sso.twitch.tv",
+        "passport.twitch.tv",
+        "vod-secure.twitch.tv",
+        "clips-media-assets2.twitch.tv",
+        "api.twitch.tv",
+        "id.twitch.tv",
+        "ids.twitch.tv"
+      ],
+      "upstream_file": "conf/upstreams/twitch.list",
+      "candidates": [
+        "151.101.194.214",
+        "151.101.2.214",
+        "151.101.66.214",
+        "151.101.130.214",
+        "140.248.166.167",
+        "140.248.130.167"
+      ],
+      "probe": {
+        "hostname": "www.twitch.tv",
+        "port": 443
+      }
+    },
+    {
+      "name": "twitchcdn",
+      "service": "twitch",
+      "url": "https://www.twitch.tv/",
+      "comment": "Twitch 静态 CDN 与直播视频流。jtvnw.net（表情/图片）与 ttvnw.net（HLS 分片）都带真实 SNI 可用、且不在 SNI 黑名单里，所以用 dns 模式。**绝不能改成 loopback**：CloudFront 对自定义域名强制要求 SNI，去掉 SNI 直接 handshake failure，直播就全断了。",
+      "enabled": true,
+      "dns_mode": "dns",
+      "cert_san": [],
+      "hosts": [
+        "jtvnw.net",
+        "static-cdn.jtvnw.net",
+        "ttvnw.net",
+        "usher.ttvnw.net",
+        "hls.ttvnw.net"
+      ],
+      "probe": {
+        "hostname": "static-cdn.jtvnw.net",
+        "port": 443
+      }
+    },
+    {
+      "name": "relaycert",
+      "service": "",
+      "url": "",
+      "comment": "仅用于签发中继站点的证书（googlevideo / Twitch VOD / Discord 更新）。SNI 在隧道内部，外面看到的是我们这张本地证书。",
+      "enabled": true,
+      "dns_mode": "loopback",
+      "cert_san": [
+        "*.googlevideo.com",
+        "googlevideo.com",
+        "stable.dl2.discordapp.net",
+        "dl.dl2.discordapp.net",
+        "dl.discordapp.net",
+        "vod-secure.twitch.tv",
+        "clips-media-assets2.twitch.tv",
+        "api.twitch.tv",
+        "passport.twitch.tv",
+        "id.twitch.tv",
+        "ids.twitch.tv"
+      ],
+      "hosts": []
+    },
+    {
+      "name": "curseforge",
+      "service": "curseforge",
+      "url": "https://www.curseforge.com/",
+      "comment": "CurseForge。实测没有 SNI 阻断、也没有 ECH 需求：主站走 Cloudflare、API 与文件 CDN 走 AWS CloudFront，带真实 SNI 都能正常应答，所以用 dns 模式（只修系统 DNS 给的错误地址）。注意首次访问可能遇到 Cloudflare 的\"请稍候\" 挑战页，真实浏览器会自动通过（实测 1.2 秒出标题、状态 200）。",
+      "enabled": true,
+      "dns_mode": "dns",
+      "cert_san": [],
+      "hosts": [
+        "curseforge.com",
+        "www.curseforge.com",
+        "api.curseforge.com",
+        "authors.curseforge.com",
+        "minecraft.curseforge.com",
+        "static.curseforge.com",
+        "cf.curseforge.com",
+        "legacy.curseforge.com",
+        "forgecdn.net",
+        "edge.forgecdn.net",
+        "media.forgecdn.net",
+        "mediafilez.forgecdn.net",
+        "files.forgecdn.net"
+      ],
+      "probe": {
+        "hostname": "www.curseforge.com",
+        "port": 443
+      }
+    },
+    {
+      "name": "cloudflare",
+      "service": "cloudflare",
+      "url": "https://www.cloudflare.com/",
+      "comment": "Cloudflare 自家的站点与服务。实测没有 SNI 阻断：cloudflare.com / www / dash / api / developers / support / community / workers / cdnjs / trycloudflare / cloudflareaccess 带真实 SNI 全部能拿到 HTTP 应答，所以用 dns 模式（只修系统 DNS 给的地址）。dash 返回的 403 是 Cloudflare 自己对人机/Session 的判定，不是网络阻断。注意：one.one.one.one(1.1.1.1) 与 cloudflare-dns.com 在本网络不可用，未纳入。",
+      "enabled": true,
+      "dns_mode": "dns",
+      "cert_san": [],
+      "hosts": [
+        "cloudflare.com",
+        "www.cloudflare.com",
+        "dash.cloudflare.com",
+        "api.cloudflare.com",
+        "developers.cloudflare.com",
+        "support.cloudflare.com",
+        "community.cloudflare.com",
+        "blog.cloudflare.com",
+        "radar.cloudflare.com",
+        "workers.cloudflare.com",
+        "cdnjs.cloudflare.com",
+        "cloudflareaccess.com",
+        "trycloudflare.com",
+        "pages.dev"
+      ],
+      "probe": {
+        "hostname": "www.cloudflare.com",
+        "port": 443
+      }
+    },
+    {
+      "name": "onedrive",
+      "service": "onedrive",
+      "url": "https://onedrive.live.com/",
+      "comment": "带 SNI 的连接会被重置，而不发 SNI、只带 Host 的请求能拿到真实 302/页面",
+      "enabled": true,
+      "dns_mode": "loopback",
+      "cert_san": [
+        "onedrive.live.com",
+        "*.onedrive.live.com"
+      ],
+      "hosts": [
+        "onedrive.live.com",
+        "www.onedrive.live.com",
+        "skyapi.onedrive.live.com"
+      ],
+      "candidates": [
+        "13.107.137.11",
+        "13.107.139.11",
+        "150.171.22.11"
+      ],
+      "upstream_file": "conf/upstreams/onedrive.list",
+      "probe": {
+        "hostname": "onedrive.live.com",
+        "port": 443
+      }
+    },
+    {
+      "name": "mega",
+      "service": "mega",
+      "url": "https://mega.nz/",
+      "comment": "带 SNI 被重置，无 SNI + 真 Host 能拿到真实 MEGA 首页；且边缘握手要 9-12 秒，所以用放宽超时的参数",
+      "enabled": true,
+      "dns_mode": "loopback",
+      "cert_san": [
+        "mega.nz",
+        "*.mega.nz",
+        "mega.io",
+        "*.mega.io"
+      ],
+      "hosts": [
+        "mega.nz",
+        "www.mega.nz",
+        "mega.io",
+        "www.mega.io"
+      ],
+      "candidates": [
+        "31.216.144.5",
+        "31.216.145.5",
+        "66.203.127.23",
+        "66.203.124.37"
+      ],
+      "upstream_file": "conf/upstreams/mega.list",
+      "probe": {
+        "hostname": "mega.nz",
+        "port": 443
+      }
+    },
+    {
+      "name": "megaapi",
+      "service": "mega",
+      "url": "https://mega.nz/",
+      "comment": "带 SNI 被重置；无 SNI 时 POST /cs 能拿到真实的空 body（\"-2\" 表示未提供会话）",
+      "enabled": true,
+      "dns_mode": "loopback",
+      "cert_san": [
+        "g.api.mega.co.nz"
+      ],
+      "hosts": [
+        "g.api.mega.co.nz"
+      ],
+      "candidates": [
+        "66.203.125.12",
+        "66.203.125.16"
+      ],
+      "upstream_file": "conf/upstreams/megaapi.list",
+      "probe": {
+        "hostname": "g.api.mega.co.nz",
+        "port": 443
+      }
+    },
+    {
+      "name": "dropbox",
+      "service": "dropbox",
+      "url": "https://www.dropbox.com/",
+      "comment": "带 SNI 被重置，无 SNI + 真 Host 能拿到真实 200 首页",
+      "enabled": true,
+      "dns_mode": "loopback",
+      "cert_san": [
+        "dropbox.com",
+        "*.dropbox.com"
+      ],
+      "hosts": [
+        "dropbox.com",
+        "www.dropbox.com",
+        "bolt.dropbox.com"
+      ],
+      "candidates": [
+        "162.125.85.18",
+        "162.125.248.18"
+      ],
+      "upstream_file": "conf/upstreams/dropbox.list",
+      "probe": {
+        "hostname": "dropbox.com",
+        "port": 443
+      }
+    },
+    {
+      "name": "onedrive-dns",
+      "service": "onedrive",
+      "url": "https://onedrive.com/",
+      "comment": "OneDrive 里带 SNI 正常的那部分（onedrive.com 跳转、微软登录、文件下载主机）。只需修解析。",
+      "enabled": true,
+      "dns_mode": "dns",
+      "cert_san": [],
+      "hosts": [
+        "onedrive.com",
+        "www.onedrive.com",
+        "api.onedrive.com",
+        "1drv.ms",
+        "login.live.com",
+        "account.live.com",
+        "login.microsoftonline.com",
+        "storage.live.com",
+        "public.dm.files.1drv.com"
+      ],
+      "probe": {
+        "hostname": "onedrive.com",
+        "port": 443
+      }
+    },
+    {
+      "name": "mega-dns",
+      "service": "mega",
+      "url": "https://mega.nz/",
+      "comment": "MEGA 带 SNI 正常的域名。mega.co.nz 握手 9-12 秒但能通。",
+      "enabled": true,
+      "dns_mode": "dns",
+      "cert_san": [],
+      "hosts": [
+        "mega.co.nz",
+        "eu.api.mega.co.nz"
+      ],
+      "probe": {
+        "hostname": "mega.co.nz",
+        "port": 443
+      }
+    },
+    {
+      "name": "dropbox-dns",
+      "service": "dropbox",
+      "url": "https://www.dropbox.com/",
+      "comment": "Dropbox 的 API 与上传域名，带 SNI 正常，只需修解析。注意下载 CDN dl.dropboxusercontent.com 实测不可用（无 SNI 也不路由）。",
+      "enabled": true,
+      "dns_mode": "dns",
+      "cert_san": [],
+      "hosts": [
+        "api.dropboxapi.com",
+        "content.dropboxapi.com"
+      ],
+      "probe": {
+        "hostname": "api.dropboxapi.com",
+        "port": 443
+      }
+    },
+    {
+      "name": "roblox",
+      "service": "roblox",
+      "url": "https://www.roblox.com/",
+      "comment": "Roblox。自有边缘（128.116.x）带真 SNI 正常，CloudFront 资源域名也必须真 SNI，所以 dns 模式即可。注意：全球服有地区限制（www 会跳 roblox.cn / roblox.qq.com，games API 返回 403），这不是网络问题。",
+      "enabled": true,
+      "dns_mode": "dns",
+      "cert_san": [],
+      "hosts": [
+        "roblox.com",
+        "www.roblox.com",
+        "auth.roblox.com",
+        "apis.roblox.com",
+        "assetdelivery.roblox.com",
+        "games.roblox.com",
+        "users.roblox.com",
+        "thumbnails.roblox.com",
+        "clientsettingscdn.roblox.com",
+        "setup.rbxcdn.com",
+        "tr.rbxcdn.com",
+        "images.rbxcdn.com",
+        "static.rbxcdn.com"
+      ],
+      "probe": {
+        "hostname": "roblox.com",
+        "port": 443
+      }
+    },
+    {
+      "name": "nexusmods",
+      "service": "nexusmods",
+      "url": "https://www.nexusmods.com/",
+      "comment": "NexusMods。主站与 API 走 Cloudflare，带真 SNI 正常（www 的 403 是 Cloudflare 的人机挑战，不是被墙），所以用 dns 模式。静态图片域名 staticdelivery 实测能直接拉到真实字节。注意 mod 文件域名 files.nexus-cdn.com 的下载链接需要 API key 签发，无 key 时会被 302 到签名无效页 —— 这是应用层限制，不是网络问题。cdn.nexusmods.com 三源 NXDOMAIN，未纳入。",
+      "enabled": true,
+      "dns_mode": "dns",
+      "cert_san": [],
+      "hosts": [
+        "nexusmods.com",
+        "www.nexusmods.com",
+        "api.nexusmods.com",
+        "users.nexusmods.com",
+        "staticdelivery.nexusmods.com",
+        "files.nexus-cdn.com"
+      ],
+      "probe": {
+        "hostname": "www.nexusmods.com",
+        "port": 443
+      }
+    },
+    {
+      "name": "modrinth",
+      "service": "modrinth",
+      "url": "https://modrinth.com/",
+      "comment": "Modrinth。站点在 Cloudflare，带真 SNI 正常；下载 CDN 在 Fastly，也要求真 SNI（不带 SNI 会被 421）。实测从一个真实 jar 拉到 1,211,839 字节，SHA-512 与 API 给的值完全一致，所以只需 dns 模式。API 公开、不需要 key。",
+      "enabled": true,
+      "dns_mode": "dns",
+      "cert_san": [],
+      "hosts": [
+        "modrinth.com",
+        "www.modrinth.com",
+        "api.modrinth.com",
+        "cdn.modrinth.com"
+      ],
+      "probe": {
+        "hostname": "www.modrinth.com",
+        "port": 443
+      }
+    },
+    {
+      "name": "modio",
+      "service": "modio",
+      "url": "https://mod.io/",
+      "comment": "mod.io。它的域名被针对性 SNI 阻断：同一台 Cloudflare IP 上换别的域名都正常，只有 mod.io 的 SNI 在 200 毫秒内被重置；不带 SNI 又会被 Cloudflare 拒绝，所以必须走 ECH（走 Cloudflare 的共享 ECH 配置）。这是本轮唯一需要 ech 的站点。注意 mod.io 自己公布的 API 需要 key。",
+      "enabled": true,
+      "dns_mode": "ech",
+      "cert_san": [],
+      "hosts": [
+        "mod.io",
+        "www.mod.io",
+        "api.mod.io",
+        "thumb.mod.io",
+        "cdn.mod.io"
+      ],
+      "probe": {
+        "hostname": "www.mod.io",
+        "port": 443
+      },
+      "candidates": [
+        "104.18.35.127",
+        "172.64.152.129"
+      ],
+      "ech_override": "auto:cloudflare",
+      "ech_fallback": "dns"
+    },
+    {
+      "name": "x",
+      "service": "x",
+      "url": "https://x.com/",
+      "comment": "X（原 Twitter）前门。带精确 SNI 会被重置，且它的 Cloudflare zone 不接受共享 ECH（实测回 403），所以走 loopback：上游发带根点的 SNI（x.com.），GFW 不拦这种写法，Host 原样透传。twitter.com 等旧域名即使带根点也被重置，未纳入。",
+      "enabled": true,
+      "dns_mode": "loopback",
+      "cert_san": [
+        "x.com",
+        "*.x.com",
+        "t.co"
+      ],
+      "hosts": [
+        "x.com",
+        "www.x.com",
+        "api.x.com",
+        "t.co"
+      ],
+      "candidates": [
+        "104.18.11.118",
+        "172.64.152.129",
+        "172.64.145.17",
+        "104.18.35.127",
+        "162.159.130.233",
+        "162.159.138.232"
+      ],
+      "probe": {
+        "hostname": "x.com",
+        "port": 443
+      },
+      "upstream_file": "conf/upstreams/x.list",
+      "probe_sni": "$host."
+    },
+    {
+      "name": "twimg",
+      "service": "x",
+      "url": "https://x.com/",
+      "comment": "X 的图片/静态/视频 CDN。三个域名都在 Fastly 上，真实 SNI 会被重置、不发 SNI 会被 400；解法是 upstream 改为发送 twimg.twitter.map.fastly.net 这个不被拦的 SNI，Host 原样透传。三个必须一起接管，否则 X 页面没有样式。",
+      "enabled": true,
+      "dns_mode": "loopback",
+      "cert_san": [
+        "pbs.twimg.com",
+        "abs.twimg.com",
+        "video.twimg.com",
+        "*.twimg.com"
+      ],
+      "hosts": [
+        "pbs.twimg.com",
+        "abs.twimg.com",
+        "video.twimg.com"
+      ],
+      "candidates": [
+        "140.248.164.158",
+        "146.75.32.1",
+        "199.232.36.1"
+      ],
+      "upstream_file": "conf/upstreams/twimg.list",
+      "probe": {
+        "hostname": "pbs.twimg.com",
+        "port": 443
+      },
+      "probe_sni": "twimg.twitter.map.fastly.net"
+    },
+    {
+      "name": "grok",
+      "service": "grok",
+      "url": "https://grok.com/",
+      "comment": "Grok 与 xAI。精确 SNI 在 27-40 毫秒内被重置、不带 SNI 又会被 Cloudflare 拒绝，所以走 loopback 并在上游发送带根点的 SNI（grok.com. / x.ai.）；Host 保持原样。CF 按 SNI 分区，SNI 与 Host 不同名会 403。",
+      "enabled": true,
+      "dns_mode": "loopback",
+      "cert_san": [
+        "grok.com",
+        "*.grok.com",
+        "x.ai",
+        "*.x.ai"
+      ],
+      "hosts": [
+        "grok.com",
+        "www.grok.com",
+        "x.ai",
+        "www.x.ai",
+        "accounts.x.ai",
+        "docs.x.ai",
+        "console.x.ai",
+        "status.x.ai",
+        "grok.x.ai",
+        "cdn.grok.com",
+        "files.grok.com",
+        "assets.grok.com"
+      ],
+      "candidates": [
+        "104.18.28.234",
+        "104.18.29.234",
+        "104.18.18.80"
+      ],
+      "upstream_file": "conf/upstreams/grok.list",
+      "probe": {
+        "hostname": "grok.com",
+        "port": 443
+      },
+      "probe_sni": "$host."
+    },
+    {
+      "name": "openai",
+      "service": "openai",
+      "url": "https://openai.com/",
+      "comment": "OpenAI 官网页与静态 CDN。这几个带真 SNI 是正常的（返回的 403 是 Cloudflare 的 WAF/人机页，不是被墙），所以只需 dns 模式修解析。静态资源 cdn.oaistatic.com 实测能拿到真实的 JS 字节。",
+      "enabled": true,
+      "dns_mode": "dns",
+      "cert_san": [],
+      "hosts": [
+        "openai.com",
+        "www.openai.com",
+        "platform.openai.com",
+        "auth.openai.com",
+        "cdn.oaistatic.com",
+        "cdn.openai.com"
+      ],
+      "probe": {
+        "hostname": "openai.com",
+        "port": 443
+      }
+    }
+  ]
+}

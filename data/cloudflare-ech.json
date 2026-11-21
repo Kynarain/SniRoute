@@ -1,0 +1,12 @@
+{
+  "_comment": "Cloudflare 网络公开的 ECH 配置（ECHConfigList，base64）。来源：dns.alidns.com 的 type=65 查询 cloudflare-ech.com，2026-11-18 获取。它会轮换，别当常量用。",
+  "_source": "https://dns.alidns.com/resolve?name=cloudflare-ech.com&type=65",
+  "_fetched_at": "2026-11-21",
+  "_refresh_hint": "建议每小时重新查一次；失败时保留旧值并在日志里说明",
+  "greeting_name": "cloudflare-ech.com",
+  "ech_config": "AEX+DQBB/wAgACDjpepsjXftMsCJ1CoUWcm/zU2pFocsL2KMJhfPMIUgIQAEAAEAAQASY2xvdWRmbGFyZS1lY2guY29tAAA=",
+  "alpn": [
+    "h2"
+  ],
+  "_note": "这个配置对应 Cloudflare 的全网 greeting 名 cloudflare-ech.com。浏览器拿到它之后，会在 ClientHello 里把真实域名放进加密的内层，外层只显示 cloudflare-ech.com。"
+}

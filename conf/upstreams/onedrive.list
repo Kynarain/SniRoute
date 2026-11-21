@@ -1,0 +1,10 @@
+# onedrive 上游（conf/upstreams/onedrive.list）
+#
+# 13.107.137.11 / 13.107.139.11：onedrive.live.com 无 SNI + 真 Host -> 302 真实响应
+# 150.171.22.11：skyapi.onedrive.live.com 用的同一套前端，实测可路由
+#
+# 地址会变。失效时用：scripts\sniroute.py site <域名>
+
+server 13.107.137.11:443  max_fails=2 fail_timeout=15s;
+server 13.107.139.11:443  max_fails=2 fail_timeout=15s;
+server 150.171.22.11:443  max_fails=2 fail_timeout=15s;

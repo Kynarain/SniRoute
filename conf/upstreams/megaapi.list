@@ -1,0 +1,8 @@
+# megaapi 上游（conf/upstreams/megaapi.list）
+#
+# 66.203.125.12 / .16：POST /cs 无 SNI 时返回真实 API 字节
+#
+# 地址会变。失效时用：scripts\sniroute.py site <域名>
+
+server 66.203.125.12:443  max_fails=2 fail_timeout=15s;
+server 66.203.125.16:443  max_fails=2 fail_timeout=15s;

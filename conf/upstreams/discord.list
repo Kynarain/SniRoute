@@ -1,0 +1,17 @@
+# Discord 上游地址池（conf/upstreams/discord.list）
+#
+# 这些是 discord.com / gateway.discord.gg 解析到的 Cloudflare 边缘地址。
+# 本机 nginx 连它们时**不发 SNI**：Discord 的这几个域名靠 Host 头就能路由
+# （实测 discord.com 无 SNI 仍返回 200，gateway 返回 404 属正常，因为根路径
+# 本来就没有内容）。
+#
+# 注意本文件只对 discord.com / gateway 有效。cdn.discordapp.com 与
+# media.discordapp.net 是 Cloudflare 按 SNI 分区的，无 SNI 一律 403，
+# 走本机代理拿不到图片/附件——这是协议决定的，不是配置问题。
+#
+# 地址会变。失效时用：scripts\sniroute.py site discord.com
+
+server 162.159.137.232:443 max_fails=1 fail_timeout=15s;
+server 162.159.130.234:443 max_fails=1 fail_timeout=15s;
+server 162.159.134.233:443 max_fails=1 fail_timeout=15s;
+server 162.159.133.232:443 max_fails=1 fail_timeout=15s;

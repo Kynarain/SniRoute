@@ -1,0 +1,16 @@
+# Grok / xAI 上游（conf/upstreams/grok.list）
+#
+# 与 X 同一套手法：带根点的 SNI（grok.com. / x.ai.）不被拦，精确域名会 RST。
+# 无 SNI 会被 Cloudflare 直接拒绝（handshake_failure），所以绝不能写 proxy_ssl_server_name off。
+#
+# 实测（带根点 SNI，每个 3/3 成功、返回真实 HTML）：
+#   104.18.28.234   grok.com  200 239,449 字节
+#   104.18.29.234   同上
+#   104.18.18.80    x.ai 200 205,297 字节
+# 必须排除 104.18.19.80：TCP 能连但 TLS 对所有 SNI 都黑洞。
+#
+# 地址会变。失效时用：scripts\sniroute.py site grok.com
+
+server 104.18.28.234:443     max_fails=2 fail_timeout=15s;
+server 104.18.29.234:443     max_fails=2 fail_timeout=15s;
+server 104.18.18.80:443      max_fails=2 fail_timeout=15s;

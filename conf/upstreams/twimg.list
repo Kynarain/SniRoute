@@ -1,0 +1,15 @@
+# twimg 上游（conf/upstreams/twimg.list）
+#
+# pbs / abs / video 都在 Fastly。真实 SNI 被重置、不发 SNI 被 400，
+# 但把上游 SNI 换成 Fastly 的通用映射名 twimg.twitter.map.fastly.net 就能通，
+# Host 保持原样由 Fastly 路由。
+#
+# 本机复测（每个都返回真实应答：200 图标 912 字节 / 404 空、Server-Timing x-tw-cdn=FT）：
+#   199.232.36.1  /  140.248.164.159  /  146.75.32.1  /  140.248.164.158
+#
+# 地址会变。失效时用：scripts\sniroute.py site pbs.twimg.com
+
+server 199.232.36.1:443      max_fails=2 fail_timeout=15s;
+server 140.248.164.159:443   max_fails=2 fail_timeout=15s;
+server 146.75.32.1:443       max_fails=2 fail_timeout=15s;
+server 140.248.164.158:443   max_fails=2 fail_timeout=15s;

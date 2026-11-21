@@ -1,0 +1,17 @@
+# Steam 社区上游（conf/upstreams/steamcommunity.list）
+#
+# steamcommunity.com 在这个网络里：带 SNI 的连接被重置，不发 SNI 反而正常。
+# 所以走本机代理（本机终结 TLS、上游不发 SNI），靠 Host 头路由。
+#
+# 下面三个地址是实测能稳定返回 200 的 Akamai 边缘（每个试 3 次全通过）：
+#   104.89.103.51    3/3
+#   23.15.140.216    3/3
+#   23.205.151.43    3/3
+# 而 104.83.197.9 会重置、23.15.142.182 返回 403、23.201.103.41 握手失败，
+# 所以没有放进来。
+#
+# 地址会变。失效时用：scripts\sniroute.py site steamcommunity.com
+
+server 104.89.103.51:443  max_fails=2 fail_timeout=15s;
+server 23.15.140.216:443  max_fails=2 fail_timeout=15s;
+server 23.205.151.43:443  max_fails=2 fail_timeout=15s;

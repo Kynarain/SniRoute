@@ -1,0 +1,18 @@
+# X 前门上上游（conf/upstreams/x.list）
+#
+# 关键：上游 SNI 用的是「域名加尾点」形式（x.com.），GFW 不拦这种写法，
+# 精确的 x.com 会在 ClientHello 后立刻被重置。Host 头保持不带尾点的原样。
+#
+# 实测每个 3/3 成功（200）：
+#   104.18.11.118  /  172.64.152.129  /  172.64.145.17
+#   104.18.35.127  /  162.159.130.233  /  162.159.138.232
+# 剔除：104.18.10.118（本轮 0/3，会 SSL EOF 或超时）
+#
+# 地址会变。失效时用：scripts\sniroute.py site x.com
+
+server 104.18.11.118:443     max_fails=2 fail_timeout=15s;
+server 172.64.152.129:443    max_fails=2 fail_timeout=15s;
+server 172.64.145.17:443     max_fails=2 fail_timeout=15s;
+server 104.18.35.127:443     max_fails=2 fail_timeout=15s;
+server 162.159.130.233:443   max_fails=2 fail_timeout=15s;
+server 162.159.138.232:443   max_fails=2 fail_timeout=15s;

@@ -1,0 +1,56 @@
+# 本机生成的密钥与证书，绝不入库
+ca/
+certs/
+*.csr
+*.srl
+*.new
+*.bak
+
+# 运行期产物
+logs/
+temp/
+*.pid
+
+# Chrome 独立配置目录（浏览器自己生成，可能上百 MB）
+chromeprofile/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# Java 构建产物
+build/
+
+# ---- 构建/发布产物（含二进制，不进仓库）----
+dist/
+*.msi
+*.zip
+*.apk
+*.idsig
+*.exe
+Sniroute.exe
+
+# ---- 证书与私钥 ----
+# 根 CA 私钥在 ca/（已有规则）；站点私钥在 conf/certs/
+conf/certs/
+*.key
+*.pfx
+*.p12
+*.jks
+*.keystore
+keystore.pass
+
+# ---- 本机路径/运行期状态 ----
+nginx.path
+*.log
+*.tmp
+data/relay.json
+warp-pc.conf
+warp-clash.yaml
+
+# ---- 编辑器/系统 ----
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

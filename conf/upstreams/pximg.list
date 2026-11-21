@@ -1,0 +1,14 @@
+# 由 scripts/sniroute.py probe 生成 —— 手工改动会在下次 probe 时被覆盖。
+# 站点：pximg   探测：i.pximg.net:443
+# 生成时间：2026-11-19 07:27:02   探测模式：auto
+
+server 210.140.139.131:443 max_fails=1 fail_timeout=10s;   # 156ms 无SNI verified WR1
+server 210.140.139.134:443 max_fails=1 fail_timeout=10s;   # 156ms 无SNI verified WR1
+server 210.140.139.135:443 max_fails=1 fail_timeout=10s;   # 171ms 无SNI verified WR1
+server 210.140.139.133:443 max_fails=1 fail_timeout=10s;   # 187ms 无SNI verified WR1
+server 210.140.139.150:443 max_fails=1 fail_timeout=10s;   # 188ms 无SNI verified WR1
+server 210.140.139.149:443 max_fails=1 fail_timeout=10s;   # 203ms 无SNI verified WR1
+server 210.140.139.132:443 max_fails=1 fail_timeout=10s;   # 203ms 无SNI verified WR1
+server 210.140.139.138:443 max_fails=1 fail_timeout=10s;   # 250ms 无SNI verified WR1
+server 210.140.139.136:443 max_fails=1 fail_timeout=10s;   # 266ms 无SNI verified WR1
+server 210.140.139.137:443 max_fails=1 fail_timeout=10s;   # 281ms 无SNI verified WR1
