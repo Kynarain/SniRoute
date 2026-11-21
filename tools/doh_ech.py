@@ -59,10 +59,44 @@ LOG_PATH = None
 # 多个端点轮着试：实测 doh.pub 会偶发 RST（WinError 10054），单端点会导致
 # 整个浏览器时好时坏，而症状看起来像"ECH 没生效"，极难定位。
 FORWARD_DOHS = [
-    "https://doh.pub/dns-query",
+    # 阿里云放第一位：实测 0.11s（钉 IP 后），doh.pub 约 0.8s。
     "https://dns.alidns.com/dns-query",
+    "https://doh.pub/dns-query",
+    # dns.google 在 WARP 关闭时必然超时；放在最后，并靠下面的冷却机制跳过，
+    # 否则每次查询都要白等一个超时才轮到它。
     "https://dns.google/dns-query",
 ]
+
+# 端点失败后的冷却（秒）：连续失败 2 次就暂时不再尝试。
+# 没有它，"默认关闭 WARP"时每次都先从被墙端点开始等，整体延迟被放大。
+FORWARD_COOLDOWN = 600.0
+_FORWARD_FAIL: dict = {}
+
+# 上游域名 -> 固定 IP。
+#
+# 为什么必须写死：本后端自己也在 53 端口提供明文 DNS（全局模式下 NRPT 指向
+# 127.0.0.1:53）。如果转发时用域名（doh.pub 等），urllib 会做一次系统解析，
+# 这个解析又回到自己的 53 端口 -> 再次进入 forward() -> **递归**，只能等超时。
+# 实测表现：每个新查询卡满 3×4 秒，之后靠缓存才快。
+# 直接把上游域名钉到 IP，SNI 仍然是域名，TLS 校验不受影响。
+_FORWARD_IPS = {
+    "doh.pub": "120.53.53.53",
+    "dns.alidns.com": "223.5.5.5",
+    "dns.google": "8.8.8.8",
+}
+
+_orig_getaddrinfo = socket.getaddrinfo
+
+
+def _forward_getaddrinfo(host, *args, **kwargs):
+    ip = _FORWARD_IPS.get(host)
+    if ip:
+        host = ip
+    return _orig_getaddrinfo(host, *args, **kwargs)
+
+
+socket.getaddrinfo = _forward_getaddrinfo
+
 
 # 简单应答缓存：浏览器会对同一域名反复查询，缓存能把上游压力降一个数量级
 _FORWARD_CACHE: dict = {}
@@ -455,6 +489,11 @@ def shared_cloudflare_ech() -> str:
     now = _time.monotonic()
     if _SHARED_ECH["value"] and now - _SHARED_ECH["ts"] < 3600:
         return _SHARED_ECH["value"]
+    # 失败冷却：拿不到就 120 秒内不再试。
+    # 没有它，每个 HTTPS(65) 查询都会重新走一遍上游（3 端点 × 4s），
+    # 浏览器会看到十几秒的空白——WARP 关闭时尤其明显。
+    if now < _SHARED_ECH.get("retry_after", 0.0):
+        return _SHARED_ECH["value"]
     try:
         raw = https_param(forward(build_query("cloudflare-ech.com", TYPE_HTTPS)), 5)
         if raw:
@@ -463,6 +502,9 @@ def shared_cloudflare_ech() -> str:
             emit(f"[ech] 已从 cloudflare-ech.com 刷新共享配置（{len(raw)} 字节）")
     except Exception as exc:
         emit(f"[ech] 刷新共享配置失败: {exc}")
+        _SHARED_ECH["retry_after"] = now + 120.0
+    if not _SHARED_ECH["value"]:
+        _SHARED_ECH["retry_after"] = now + 120.0
     return _SHARED_ECH["value"]
 
 
@@ -530,18 +572,23 @@ def forward(query: bytes) -> bytes:
 
     last_err = None
     for endpoint in FORWARD_DOHS:
+        fails, until = _FORWARD_FAIL.get(endpoint, (0, 0.0))
+        if fails >= 2 and now < until:
+            continue
         req = urllib.request.Request(
             endpoint, data=query,
             headers={"content-type": "application/dns-message",
                      "accept": "application/dns-message"})
         try:
-            with urllib.request.urlopen(req, timeout=6) as resp:
+            with urllib.request.urlopen(req, timeout=3) as resp:
                 body = resp.read()
             if len(body) >= 12:
                 _FORWARD_CACHE[query] = (now, body)
                 return body
         except Exception as exc:
             last_err = exc
+            fails, _ = _FORWARD_FAIL.get(endpoint, (0, 0.0))
+            _FORWARD_FAIL[endpoint] = (fails + 1, now + FORWARD_COOLDOWN)
             continue
 
     # 全部失败时返回 SERVFAIL，而不是抛 500 —— 浏览器至少能重试或回退，

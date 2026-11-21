@@ -908,46 +908,19 @@ def cmd_doh(args) -> None:
         return
 
     # start
-    if pid:
-        # 端口被占时不能一句"跳过"了事：占着端口的可能是**改了站点配置之前**
-        # 启动的旧实例，也可能是别的会话留下的残留进程。两种情况下新配置都不会
-        # 生效，而用户看到的只是"域名解析不对"。所以这里要区分并说清楚。
+    #
+    # 判断顺序很关键，这里踩过两次：
+    #   1) 先看 5454（后端自己的端口）。它在听就说明后端活着，别的都不用管。
+    #   2) 5454 没听时才谈启动。此时 5444 可能由 nginx 前置占着 —— 那是正常的，
+    #      不能当成"残留进程"去杀；杀了 ngixn 前置会让 5444 直接 502。
+    if doh_running():
         try:
             mine = DOH_PID.is_file() and int(DOH_PID.read_text().strip()) == pid
         except Exception:
             mine = False
-        if not mine:
-            # 5444 会有两个持有者：本工具的 nginx 前置，和 Python DoH 后端。
-            # 按端口去猜进程名会把后端误杀（实测：杀完端口仍被 nginx 占着，然后报错）。
-            # 所以只按自己的 pid 文件停后端，停完再看端口是否还能用。
-            print(f"端口 {DOH_PORT} 已被占用（pid {pid}），先按 pid 文件停掉旧 DoH…")
-            try:
-                cmd_doh(argparse.Namespace(action="stop"))
-            except Exception:
-                pass
-            time.sleep(0.6)
-            remain = port_listener_pid(DOH_PORT)
-            if remain is not None:
-                name = ""
-                try:
-                    res = run(["tasklist", "/FI", f"PID eq {remain}", "/FO", "CSV", "/NH"])
-                    name = (res.stdout or "").strip().strip('"').split('","')[0].lower()
-                except Exception:
-                    pass
-                if "nginx" in name:
-                    # 前置属于本工具，继续往下走即可；后端会自己再绑 5444。
-                    print(f"  5444 由 nginx 前置持有（pid {remain}），正常，继续。")
-                    # 关键：pid 必须清空，否则后面的"配置未变，跳过"会用这个旧 pid
-                    # 判定成"已在运行"，后端根本起不来（实测 5454 FAIL）。
-                    pid = None
-                else:
-                    die(f"端口 {DOH_PORT} 仍被 pid {remain}（{name or '未知进程'}）占用。\n"
-                        f"      请手动结束后重试。")
         stale = False
         try:
             pid_mtime = DOH_PID.stat().st_mtime
-            # 站点配置或 DoH 代码任一更新，运行中的实例就已经过时了。只看配置会
-            # 漏掉"升级后代码变了但配置没变"这种情况，而那正是最容易踩的。
             newest = max(SITES_JSON.stat().st_mtime, DOH_SCRIPT.stat().st_mtime)
             stale = newest > pid_mtime
         except Exception:
@@ -955,7 +928,6 @@ def cmd_doh(args) -> None:
         if stale:
             print(f"DoH 已在运行 (pid {pid})，但站点配置在那之后改过——正在重启以加载新配置。")
             cmd_doh(argparse.Namespace(action="stop"))
-            # 落回下面的启动流程
         else:
             print(f"DoH 已在运行 (pid {pid})，配置未变，跳过。")
             return

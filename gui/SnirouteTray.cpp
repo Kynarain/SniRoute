@@ -43,6 +43,7 @@ constexpr UINT WM_NAT_DONE = WM_APP + 2;   // NAT result, lParam = new std::wstr
 constexpr UINT TIMER_STATUS = 1;
 constexpr UINT TIMER_REFRESH = 2;   // upstream health sweep
 constexpr UINT TIMER_WARP = 3;      // WARP health probe
+constexpr UINT TIMER_STARTUP_UP = 4; // one-shot: run up after first-run setup
 constexpr UINT WM_WARP_ALERT = WM_APP + 21;
 constexpr UINT_PTR ID_TRAY = 1;
 constexpr UINT IDM_UP = 1001;
@@ -756,6 +757,48 @@ void RestoreLocalDns() {
     }, nullptr, 0, nullptr);
 }
 
+
+// WARP 是否由用户主动启用。标记文件 data\.warp-enabled：
+//   存在   -> 用户希望 WARP 开着（重启后保持）
+//   不存在 -> 默认关闭（产品默认状态；启动时若发现 WARP 还连着就断开）
+// 用标记文件而不是读 JSON，是为了和 .autostart-off 保持同一种做法。
+bool WarpIntentEnabled() {
+    std::wstring marker = g_root + L"\\data\\.warp-enabled";
+    return FileExists(marker);
+}
+
+void SetWarpIntent(bool enabled) {
+    std::wstring marker = g_root + L"\\data\\.warp-enabled";
+    if (enabled) {
+        HANDLE h = CreateFileW(marker.c_str(), GENERIC_WRITE, 0, nullptr,
+                               CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+        if (h != INVALID_HANDLE_VALUE) CloseHandle(h);
+    } else {
+        DeleteFileW(marker.c_str());
+    }
+}
+
+// 启动时执行"默认关闭"：用户没启用过、但 WARP 还连着 -> 断开。
+// 只在启动时做一次，不放进定时器，避免和用户手动连接打架。
+void EnforceWarpDefaultOff() {
+    if (WarpIntentEnabled()) return;
+    if (WarpState() != 1) return;
+    Log(L"[warp] default off: disconnecting");
+    std::wstring cmd = L"cmd.exe /c \"\"" + g_cliPath + L"\" warp off\"";
+    STARTUPINFOW si{};
+    si.cb = sizeof(si);
+    si.dwFlags = STARTF_USESHOWWINDOW;
+    si.wShowWindow = SW_HIDE;
+    PROCESS_INFORMATION pi{};
+    std::wstring wcmd = cmd;
+    if (CreateProcessW(nullptr, wcmd.data(), nullptr, nullptr, FALSE, CREATE_NO_WINDOW,
+                       nullptr, g_root.c_str(), &si, &pi)) {
+        WaitForSingleObject(pi.hProcess, 30000);
+        CloseHandle(pi.hProcess);
+        CloseHandle(pi.hThread);
+    }
+}
+
 // ---------------------------------------------------------------- WARP 健康告警
 // 两种"WARP 不能用"：
 //   1) 状态从 connected 变成 disconnected      -> 立刻通知
@@ -807,7 +850,7 @@ void RunWarpHealthCheck() {
             return 0;
         }
         if (st != 1) {                     // 断开
-            if (g_warpLastState == 1 && !g_warpManualStop) {
+            if (g_warpLastState == 1 && !g_warpManualStop && WarpIntentEnabled()) {
                 Log(L"[warp] alert: disconnected");
                 PostMessageW(g_hwnd, WM_WARP_ALERT, 1, 0);
             }
@@ -835,7 +878,7 @@ void RunWarpHealthCheck() {
 }
 
 // ---------------------------------------------------------------- status rows
-constexpr wchar_t kAppVersion[] = L"3.10.5";
+constexpr wchar_t kAppVersion[] = L"3.10.8";
 
 // NRPT rule installed? Same key the installer writes, so status cannot lie.
 bool NrptInstalled() {
@@ -1046,6 +1089,9 @@ void ShowMenu() {
             std::wstring stateLine = g_str.get(L"warp_state", L"WARP: ");
             stateLine += (ws == 1) ? g_str.get(L"warp_on", L"connected")
                                    : g_str.get(L"warp_off_state", L"disconnected");
+            if (!WarpIntentEnabled() && ws == 2) {
+                stateLine += g_str.get(L"warp_default_off", L" (off by default)");
+            }
             AppendMenuW(warpMenu, MF_STRING | MF_GRAYED, 0, stateLine.c_str());
             AppendMenuW(warpMenu, MF_SEPARATOR, 0, nullptr);
             AppendMenuW(warpMenu, MF_STRING, IDM_WARP_ON, g_str.get(L"warp_connect", L"Connect WARP"));
@@ -1190,6 +1236,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             RunWarpInstall();
             return 0;
         case IDM_WARP_ON:
+            SetWarpIntent(true);
             g_warpManualStop = false;
             g_warpFailStreak = 0;
             RunWarpAction(L"on");
@@ -1198,6 +1245,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                     NIIF_INFO);
             return 0;
         case IDM_WARP_OFF:
+            SetWarpIntent(false);
             g_warpManualStop = true;
             g_warpLastState = 2;
             RunWarpAction(L"off");
@@ -1281,6 +1329,23 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         }
         if (wp == TIMER_STATUS) {
             UpdateStatus(false);
+            return 0;
+        }
+        if (wp == TIMER_STARTUP_UP) {
+            KillTimer(g_hwnd, TIMER_STARTUP_UP);
+            std::wstring cmd = L"cmd.exe /c \"\"" + g_cliPath + L"\" up\"";
+            STARTUPINFOW si{};
+            si.cb = sizeof(si);
+            si.dwFlags = STARTF_USESHOWWINDOW;
+            si.wShowWindow = SW_HIDE;
+            PROCESS_INFORMATION pi{};
+            std::wstring w = cmd;
+            if (CreateProcessW(nullptr, w.data(), nullptr, nullptr, FALSE, CREATE_NO_WINDOW,
+                               nullptr, g_root.c_str(), &si, &pi)) {
+                CloseHandle(pi.hProcess);
+                CloseHandle(pi.hThread);
+                Log(L"[start] up spawned (delayed)");
+            }
             return 0;
         }
         if (wp == TIMER_WARP) {
@@ -1421,6 +1486,13 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, LPWSTR, int) {
     // WARP 健康检查：60 秒一次，失败两次才通知。
     // 启动时先把当前状态记下来：否则"启动时已连接、随后断开"这种转换会被漏掉
     // （第一次检查看到的是断开，而上一次状态还是未知，判定不出"从连接到断开"）。
+    // 每次启动都补跑一次 up，但**延迟 12 秒**：
+    // first-run-setup 自己也会拉起服务，立刻再跑 up 会和它抢（实测后端被互相
+    // 停掉，结果 5454 没人听、5444 返回 502）。等它结束后再补一次就稳定了。
+    SetTimer(g_hwnd, TIMER_STARTUP_UP, 12000, nullptr);
+
+    // WARP 默认关闭：用户没主动启用过就把连着的 WARP 断掉，再记状态。
+    EnforceWarpDefaultOff();
     g_warpLastState = WarpState();
     SetTimer(g_hwnd, TIMER_WARP, 60 * 1000, nullptr);
     UpdateStatus(false);
