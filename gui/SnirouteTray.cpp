@@ -24,6 +24,7 @@
 #include <windows.h>
 #include <shellapi.h>
 #include <string>
+#include <algorithm>
 #include <vector>
 #include <map>
 #include <atomic>
@@ -878,7 +879,7 @@ void RunWarpHealthCheck() {
 }
 
 // ---------------------------------------------------------------- status rows
-constexpr wchar_t kAppVersion[] = L"3.10.9";
+constexpr wchar_t kAppVersion[] = L"3.10.10";
 
 // NRPT rule installed? Same key the installer writes, so status cannot lie.
 bool NrptInstalled() {
@@ -995,6 +996,13 @@ std::vector<SiteEntry> LoadSites() {
         e.url = line.substr(bar + 1);
         if (!e.label.empty() && !e.url.empty()) out.push_back(e);
     }
+    // 菜单按首字母排序：数据文件可能来自旧版本（未排序），这里再保证一次。
+    std::sort(out.begin(), out.end(), [](const SiteEntry& a, const SiteEntry& b) {
+        std::wstring x = a.label, y = b.label;
+        for (auto& ch : x) ch = (wchar_t)towlower(ch);
+        for (auto& ch : y) ch = (wchar_t)towlower(ch);
+        return x < y;
+    });
     return out;
 }
 // ---------------------------------------------------------------- autostart

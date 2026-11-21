@@ -1289,7 +1289,7 @@ def cmd_status(args) -> None:
     print(f"  根证书 文件 {'有' if ca else '无'}（是否已装入信任库需管理员视角）")
 
     print("\n站点")
-    for site in sites:
+    for site in sorted(sites, key=lambda s: s.get("name", "").lower()):
         mode = site.get("dns_mode", "ech")
         state = "启用" if site.get("enabled", True) else ("仅DNS" if site.get("dns_override") else "停用")
         print(f"  {site['name']:<8} [{state}] mode={mode:<8} 域名:{','.join(site['hosts'])}")

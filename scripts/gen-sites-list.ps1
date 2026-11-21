@@ -49,5 +49,7 @@ foreach ($site in $cfg.sites) {
     $lines.Add("$label|$url")
 }
 
-[System.IO.File]::WriteAllLines($OutFile, $lines, (New-Object System.Text.UTF8Encoding($false)))
-Write-Host ("   supported sites: " + ($lines -join ', '))
+  # 按首字母排序（忽略大小写）：菜单是给人看的，顺序稳定比配置里的顺序重要。
+  $sorted = @($lines | Sort-Object { $_.ToLowerInvariant() })
+  [System.IO.File]::WriteAllLines($OutFile, $sorted, (New-Object System.Text.UTF8Encoding($false)))
+  Write-Host ("   supported sites: " + ($sorted -join ", "))
