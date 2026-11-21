@@ -100,7 +100,12 @@ socket.getaddrinfo = _forward_getaddrinfo
 
 # 简单应答缓存：浏览器会对同一域名反复查询，缓存能把上游压力降一个数量级
 _FORWARD_CACHE: dict = {}
-CACHE_TTL = 60.0
+# 缓存 5 分钟：浏览器对同一域名会反复问，冷查询要付一次上游往返（约 0.1–3 秒）。
+CACHE_TTL = 300.0
+# 落盘缓存：重启后端（升级、换配置）后仍然有效，否则每次重启都要重新付一遍冷查询。
+CACHE_PATH = ROOT / "data" / "doh-cache.json"
+CACHE_MAX = 2000
+_cache_dirty = False
 
 # 明文 DNS（系统解析器）与 DoH（浏览器自己的解析器）必须给出不同的答案：
 #   * 明文 DNS 无认证，ECH 配置不可信 -> 一律 127.0.0.1，交本机 nginx 终结
@@ -562,6 +567,64 @@ def answer_query(query: bytes, plain: bool = False) -> bytes:
     return build_response(query, qend, [])
 
 
+
+def _load_cache() -> None:
+    """启动时读回上次落盘的缓存；文件坏了就当没有，绝不因此启动失败。"""
+    global _FORWARD_CACHE
+    try:
+        import json as _json
+        raw = _json.loads(CACHE_PATH.read_text(encoding="utf-8"))
+    except Exception:
+        return
+    now = __import__("time").monotonic()
+    kept = 0
+    for k, v in raw.items():
+        try:
+            ts, b64 = float(v[0]), v[1]
+            blob = __import__("base64").b64decode(b64)
+        except Exception:
+            continue
+        # 落盘里存的是"写入时的 monotonic"，跨进程没有可比性；
+        # 所以落盘条目统一按短 TTL（120 秒）保守处理，避免给出过期答案。
+        _FORWARD_CACHE[__import__("base64").b64decode(k)] = (now, blob)
+        kept += 1
+        if kept >= CACHE_MAX:
+            break
+    if kept:
+        emit(f"[cache] 已载入 {kept} 条落盘缓存")
+
+
+def _save_cache() -> None:
+    """把缓存写盘。只保留未过期的条目，并做条数上限。"""
+    global _cache_dirty
+    if not _cache_dirty:
+        return
+    try:
+        import json as _json, time as _time, base64 as _b64
+        now = _time.monotonic()
+        items = []
+        for q, (ts, body) in _FORWARD_CACHE.items():
+            if now - ts <= CACHE_TTL:
+                items.append((ts, q, body))
+        items.sort(key=lambda x: x[0], reverse=True)
+        items = items[:CACHE_MAX]
+        doc = {_b64.b64encode(q).decode(): [0.0, _b64.b64encode(body).decode()]
+               for _ts, q, body in items}
+        tmp = CACHE_PATH.with_suffix(".tmp")
+        tmp.write_text(_json.dumps(doc), encoding="utf-8")
+        tmp.replace(CACHE_PATH)
+        _cache_dirty = False
+        emit(f"[cache] 已写盘 {len(doc)} 条")
+    except Exception as exc:
+        emit(f"[cache] 写盘失败: {exc}")
+
+
+def _cache_flush_loop() -> None:
+    import time as _time
+    while True:
+        _time.sleep(60)
+        _save_cache()
+
 def forward(query: bytes) -> bytes:
     """转发给公共 DoH。多端点 + 缓存，任何单点抖动都不该让浏览器整体不可用。"""
     import time as _time
@@ -571,10 +634,16 @@ def forward(query: bytes) -> bytes:
         return cached[1]
 
     last_err = None
-    for endpoint in FORWARD_DOHS:
+    tried = 0
+    for endpoint in list(FORWARD_DOHS):
         fails, until = _FORWARD_FAIL.get(endpoint, (0, 0.0))
-        if fails >= 2 and now < until:
+        cooling = fails >= 2 and now < until
+        # 所有端点都在冷却时，仍然试第一个 —— 宁可多等一次，也不要直接 SERVFAIL。
+        if cooling and tried > 0:
             continue
+        if cooling and tried == 0:
+            emit(f"[forward] 全部端点冷却中，强制重试 {endpoint}")
+        tried += 1
         req = urllib.request.Request(
             endpoint, data=query,
             headers={"content-type": "application/dns-message",
@@ -584,6 +653,11 @@ def forward(query: bytes) -> bytes:
                 body = resp.read()
             if len(body) >= 12:
                 _FORWARD_CACHE[query] = (now, body)
+                globals()["_cache_dirty"] = True
+                if len(_FORWARD_CACHE) > CACHE_MAX:
+                    # 超上限就砍掉最旧的一半，避免内存无界增长
+                    for k in sorted(_FORWARD_CACHE, key=lambda q: _FORWARD_CACHE[q][0])[:CACHE_MAX // 2]:
+                        _FORWARD_CACHE.pop(k, None)
                 return body
         except Exception as exc:
             last_err = exc
@@ -725,6 +799,10 @@ def main() -> None:
           file=sys.stderr)
 
     # 全局模式：同时说明文 DNS，供系统解析器（NRPT 指向这里）使用。
+    _load_cache()
+    import threading as _th
+    _th.Thread(target=_cache_flush_loop, name="cache-flush", daemon=True).start()
+
     if args.dns_port:
         serve_dns_plain(args.dns_listen, args.dns_port)
 
