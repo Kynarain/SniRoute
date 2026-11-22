@@ -370,49 +370,52 @@ def detect(server_spec, server2, timeout, do_turn=False):
 
     # 3) 过滤行为：CHANGE-REQUEST（RFC 5780 Test III / Test II）
     #
-    # 单次探测不足以定论：
-    #   * 公共 STUN 服务器对 CHANGE-REQUEST 的支持时灵时不灵；
-    #   * 不少家宽/CGNAT 的出口有多个网关，映射与过滤行为本身会随目的地变化。
-    # 实测同一台机器连跑 5 次，会得到"全锥 / 受限锥 / 无法判定"三种结果 ——
-    # 这不是检测代码算错，而是单点采样在给一个本来就不稳定的东西下结论。
+    # 判据的核心是收到来自“我们从未发过包的地址”的回包。这在 NAT 语义里只有
+    # 一个解释：该地址的入向包被放行了 —— 即过滤行为是端点无关（全锥）。
     #
-    # 因此这里做多轮取证，**只有结论一致才对外报告**；不一致就如实说"行为不一致"。
+    # 之前的版本要求“回包地址必须等于服务器通告的 OTHER-ADDRESS”，这是错的：
+    #   1) 首次绑定时服务器可能没回（丢包），other 为 None，判据直接失效；
+    #   2) 服务器回包端口与通告端口未必一致，比较端口会让全锥被判成无法判定。
+    # 实测这台机器：server 111.206.174.3:3478，change=IP+PORT 后从
+    # 111.206.174.2:3479 收到合法回包 —— 明显是全锥型。
+    #
+    # 另一个关键点：成功是强证据，失败是弱证据。
+    # CHANGE-REQUEST 丢包很常见，所以不能“多数轮次说了算”；只要有一轮拿到
+    # 不同 IP 的合法回包，就足以定 EIF。
+    eif = False
+    adf = False
     rounds = []
     for _round in range(5):
         r3 = probe(sock, server, timeout, change=CHANGE_IP | CHANGE_PORT)
         if r3 and "error" not in r3 and r3["type"] == BINDING_SUCCESS:
             src = r3["from"]
-            if other and src == other:
-                rounds.append("EIF")
-            elif other and src[0] != server[0] and src[0] != other[0]:
-                rounds.append("unknown")
-            else:
-                rounds.append("unsupported")
+            rounds.append(f"III->{src[0]}:{src[1]}")
+            if src[0] != server[0]:
+                eif = True
+                log(f"第 {_round + 1} 轮：收到来自 {src[0]}:{src[1]} 的回包"
+                    f"（服务器是 {server[0]}:{server[1]}）→ 过滤行为端点无关")
+                break
             continue
         r2 = probe(sock, server, timeout, change=CHANGE_PORT)
         if r2 and "error" not in r2 and r2["type"] == BINDING_SUCCESS:
             src = r2["from"]
-            if src[0] == server[0] and src[1] != server[1]:
-                rounds.append("ADF")
-            elif src[0] != server[0]:
-                rounds.append("EIF")
-            else:
-                rounds.append("unsupported")
+            rounds.append(f"II->{src[0]}:{src[1]}")
+            if src[0] != server[0]:
+                eif = True
+                log(f"第 {_round + 1} 轮：换端口后从 {src[0]}:{src[1]} 回包 → 端点无关")
+                break
+            if src[1] != server[1]:
+                adf = True
         else:
-            rounds.append("unknown")
+            rounds.append("无响应")
 
-    # 只有 5 轮全部给出同一个明确结论，才对外报这个结论。
-    # 少一轮都不算——这条链路实测会随目的地切换网关。
-    definitive = [x for x in rounds if x in ("EIF", "ADF", "APDF")]
-    if len(definitive) == len(rounds) and len(set(definitive)) == 1:
-        filtering = definitive[0]
-        log(f"过滤行为：{FILT_LABELS.get(filtering, filtering)}（{len(rounds)}/{len(rounds)} 轮一致）")
-    elif len(set(definitive)) > 1:
-        filtering = "inconsistent"
-        log(f"过滤行为：多轮结果不一致（{', '.join(rounds)}）→ 无法给出单一结论")
+    if eif:
+        filtering = "EIF"
+    elif adf:
+        filtering = "ADF"
     else:
         filtering = "unknown"
-        log(f"过滤行为：无法判定（{', '.join(rounds)}）")
+    log(f"过滤行为：{FILT_LABELS.get(filtering, filtering)}（取样 {', '.join(rounds) or '无'}）")
 
     report["filtering"] = filtering
     log(f"过滤行为：{FILT_LABELS.get(filtering, filtering)}"
