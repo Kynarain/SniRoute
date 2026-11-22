@@ -252,19 +252,27 @@ def classify(mapping, filtering, mapped, outbound):
         return "restricted-cone"
     if filtering == "APDF":
         return "port-restricted"
-    return "port-restricted"   # 过滤行为测不出时按最常见的推断
+    if filtering == "inconsistent":
+        return "inconsistent"
+    # 过滤行为测不出来（服务器不支持 CHANGE-REQUEST / 丢包）时，不要假装知道。
+    # 映射行为已经能确定是锥型还是对称，但"哪一种锥型"需要过滤行为的证据。
+    # 早期版本在这里硬猜 port-restricted，结果同一台机器换个 STUN 服务器
+    # 就变成 full-cone —— 用户看到的"结果不稳定"就是这么来的。
+    return "cone-unknown"
 
 
 LABELS = {
-    "open": "公网直连（无 NAT）",
     "full-cone": "全锥型 NAT（Full Cone）",
     "restricted-cone": "受限锥型 NAT（Restricted Cone）",
     "port-restricted": "端口受限锥型 NAT（Port-Restricted Cone）",
     "symmetric": "对称型 NAT（Symmetric）",
+    "cone-unknown": "锥型 NAT（具体类型无法判定：服务器不支持 CHANGE-REQUEST 或丢包）",
+    "inconsistent": "锥型 NAT（过滤行为多轮不一致：可能位于多网关 CGNAT）",
+    "open": "公网直连（无 NAT 或已完全映射）",
     "unknown": "无法判定",
 }
 
-MAP_LABELS = {"EIM": "端点无关（映射稳定）", "APDM": "地址端口相关", "ADM": "地址相关（对称）", "unknown": "未知"}
+MAP_LABELS = {"EIM": "端点无关（映射稳定）", "APDM": "地址端口相关", "ADM": "地址相关（对称）", "unknown": "未知", "inconsistent": "多轮不一致"}
 FILT_LABELS = {"EIF": "端点无关（全锥）", "ADF": "地址相关", "APDF": "地址端口相关", "unsupported": "服务器不支持 RFC 5780", "unknown": "未知"}
 
 
@@ -308,6 +316,12 @@ def detect(server_spec, server2, timeout, do_turn=False):
     other = None
     for i in range(3):
         r = probe(sock, server, timeout)
+        if r is None or "error" in r:
+            # 单次超时可能只是丢包：再试两次再决定是不是真的不通。
+            for _retry in range(2):
+                r = probe(sock, server, timeout)
+                if r and "error" not in r:
+                    break
         if r is None or "error" in r:
             log(f"绑定 {i + 1}: 失败（{r.get('error') if r else 'unknown'}）")
             break
@@ -354,24 +368,61 @@ def detect(server_spec, server2, timeout, do_turn=False):
     report["mapping"] = mapping
     log(f"映射行为：{MAP_LABELS[mapping]}")
 
-    # 3) 过滤行为：CHANGE-REQUEST
-    filtering = "unknown"
-    r = probe(sock, server, timeout, change=CHANGE_IP | CHANGE_PORT)
-    if r and "error" not in r:
-        if r["type"] == BINDING_SUCCESS:
-            filtering = "EIF"
-        else:
-            filtering = "unsupported"
-    else:
+    # 3) 过滤行为：CHANGE-REQUEST（RFC 5780 Test III / Test II）
+    #
+    # 单次探测不足以定论：
+    #   * 公共 STUN 服务器对 CHANGE-REQUEST 的支持时灵时不灵；
+    #   * 不少家宽/CGNAT 的出口有多个网关，映射与过滤行为本身会随目的地变化。
+    # 实测同一台机器连跑 5 次，会得到"全锥 / 受限锥 / 无法判定"三种结果 ——
+    # 这不是检测代码算错，而是单点采样在给一个本来就不稳定的东西下结论。
+    #
+    # 因此这里做多轮取证，**只有结论一致才对外报告**；不一致就如实说"行为不一致"。
+    rounds = []
+    for _round in range(5):
+        r3 = probe(sock, server, timeout, change=CHANGE_IP | CHANGE_PORT)
+        if r3 and "error" not in r3 and r3["type"] == BINDING_SUCCESS:
+            src = r3["from"]
+            if other and src == other:
+                rounds.append("EIF")
+            elif other and src[0] != server[0] and src[0] != other[0]:
+                rounds.append("unknown")
+            else:
+                rounds.append("unsupported")
+            continue
         r2 = probe(sock, server, timeout, change=CHANGE_PORT)
-        if r2 and "error" not in r:
-            filtering = "ADF" if r2["type"] == BINDING_SUCCESS else "unsupported"
+        if r2 and "error" not in r2 and r2["type"] == BINDING_SUCCESS:
+            src = r2["from"]
+            if src[0] == server[0] and src[1] != server[1]:
+                rounds.append("ADF")
+            elif src[0] != server[0]:
+                rounds.append("EIF")
+            else:
+                rounds.append("unsupported")
         else:
-            filtering = "APDF"
-    report["filtering"] = filtering
-    log(f"过滤行为：{FILT_LABELS.get(filtering, filtering)}")
+            rounds.append("unknown")
 
-    kind = classify(mapping, filtering, mapped_a, outbound)
+    # 只有 5 轮全部给出同一个明确结论，才对外报这个结论。
+    # 少一轮都不算——这条链路实测会随目的地切换网关。
+    definitive = [x for x in rounds if x in ("EIF", "ADF", "APDF")]
+    if len(definitive) == len(rounds) and len(set(definitive)) == 1:
+        filtering = definitive[0]
+        log(f"过滤行为：{FILT_LABELS.get(filtering, filtering)}（{len(rounds)}/{len(rounds)} 轮一致）")
+    elif len(set(definitive)) > 1:
+        filtering = "inconsistent"
+        log(f"过滤行为：多轮结果不一致（{', '.join(rounds)}）→ 无法给出单一结论")
+    else:
+        filtering = "unknown"
+        log(f"过滤行为：无法判定（{', '.join(rounds)}）")
+
+    report["filtering"] = filtering
+    log(f"过滤行为：{FILT_LABELS.get(filtering, filtering)}"
+        + ("" if filtering != "unknown" else "（服务器不回 CHANGE-REQUEST 或丢包，无法判定）"))
+
+    # 公网映射与本地出口相同、且端口一致 -> 没有 NAT（或已 DMZ/直连）。
+    if outbound and mapped_a and str(mapped_a[0]) == str(outbound):
+        kind = "open"
+    else:
+        kind = classify(mapping, filtering, mapped_a, outbound)
     report["kind"] = kind
     report["label"] = LABELS[kind]
     report["reason"] = (f"映射行为 {MAP_LABELS[mapping]}，过滤行为 {FILT_LABELS.get(filtering, filtering)}"
@@ -408,7 +459,30 @@ def main():
     ap.add_argument("--quiet", action="store_true", help="不打印过程日志")
     args = ap.parse_args()
 
-    report = detect(args.server, args.server2, max(500, args.timeout) / 1000.0)
+    timeout_s = max(500, args.timeout) / 1000.0
+
+    # 多服务器回退：公共 STUN 经常时通时不通（实测 stun.miwifi 两次进不去），
+    # 只试一个会把"服务器抽风"报成"UDP 被阻断"。
+    candidates = [args.server]
+    if args.server == DEFAULT_SERVER:
+        for spec in FALLBACK_SERVERS:
+            if spec not in candidates:
+                candidates.append(spec)
+
+    report = None
+    tried = []
+    for spec in candidates:
+        r = detect(spec, args.server2, timeout_s)
+        tried.append(spec)
+        report = r
+        if r.get("kind") not in (None, "blocked", "unknown"):
+            break
+        if len(candidates) > 1:
+            r["logs"].append(f"（{spec} 没拿到结果，换下一个 STUN 服务器）")
+
+    if report is None:
+        report = {"kind": "unknown", "label": "无法判定", "logs": ["没有可用的 STUN 服务器"], "reason": "没有可用的 STUN 服务器"}
+    report["servers_tried"] = tried
 
     if args.json:
         print(json.dumps(report, ensure_ascii=False, indent=2))
