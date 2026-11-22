@@ -148,7 +148,7 @@ sniroute 使用说明
   未加入 ChatGPT：chatgpt.com 的 SNI 被封、不带 SNI 也被 Cloudflare 拒绝
   （该 IP 集强制 SNI），加上 DNS 污染，只有 ECH 可能。实测 ECH 握手确实成立
   （能拿到 Cloudflare 渲染的页面），但页面内容是「Unable to load site ...
-  If you are using a VPN, try turning it off. [IP:<redacted-ip>]」——OpenAI
+  If you are using a VPN, try turning it off. [IP:<public-egress>]」——OpenAI
   按出口 IP 拦截大陆地址，网络层解决不了，所以没有加入菜单（避免放一个
   打不开的项）。
 
@@ -232,10 +232,10 @@ loopback 模式的上游 IP 是实测后写死的（conf/upstreams/*.list），C
   默认 STUN 服务器是 stun.miwifi.com:3478：Google 的 stun.l.google.com 在本网络
   解析到 127.0.0.1（DNS 被污染），不可用；Cloudflare 与 Nextcloud 作备选。
 
-  本机实测：全锥型 NAT（Full Cone），映射 <redacted-ip> 稳定，过滤端点无关。
+  本机实测：全锥型 NAT（Full Cone），映射地址稳定，过滤端点无关。
 
   注意：HTTP 反查的公网 IP 可能与 STUN 映射地址不同（本机实测 HTTP 走代理
-  203.131.255.202、UDP 直连 <redacted-ip>）。报告里会写明「以 STUN 为准」。
+  203.131.255.202、UDP 直连 <your-public-ip>）。报告里会写明「以 STUN 为准」。
 
 命令行（可选，和托盘等价）
 --------------------------

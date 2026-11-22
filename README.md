@@ -932,7 +932,7 @@ Also not added: **ChatGPT** - `chatgpt.com` has its SNI blocked, and without SNI
 Cloudflare rejects it too (that IP set forces SNI); with DNS poisoning, only
 ECH can work. ECH does complete - a Cloudflare-rendered page comes back - but
 the page reads "Unable to load site ... If you are using a VPN, try turning it
-off. [IP:<redacted-ip>]": OpenAI blocks mainland egress IPs, which the network
+off. [IP:<public-egress>]": OpenAI blocks mainland egress IPs, which the network
 layer cannot fix. It is left out of the menu rather than shipping an item that
 cannot open.
 
@@ -975,12 +975,12 @@ Default STUN server is `stun.miwifi.com:3478`. Google's `stun.l.google.com`
 resolves to 127.0.0.1 on this network (poisoned DNS) and is unusable;
 Cloudflare and Nextcloud are fallbacks.
 
-Measured on this machine: **Full Cone**, mapping stable at `<redacted-ip>`,
+Measured on this machine: **Full Cone**, mapping stable at a single public address,
 filtering independent of endpoint.
 
 One caveat: the public IP from an HTTP echo can differ from the STUN mapped
 address (measured here: HTTP via proxy `203.131.255.202`, UDP direct
-`<redacted-ip>`). The report states that STUN is authoritative.
+`<your-public-ip>`). The report states that STUN is authoritative.
 
 ## Relay (optional)
 
@@ -1297,7 +1297,7 @@ api1.origin.com 0.40s -> 23.47.146.135
 2. **忽略 CHANGE-REQUEST 的回包被当成"换了源地址"**。不支持该扩展的服务器会从
    原地址回一个正常的 BINDING_SUCCESS，旧逻辑据此判成"全锥型"。现在要求回包
    地址**正好等于服务器通告的 OTHER-ADDRESS** 才算 EIF。
-3. **单点采样**。这条链路（<redacted-ip>）实测过滤行为会随目的地变化，属于
+3. **单点采样**。这条链路（<your-public-ip>）实测过滤行为会随目的地变化，属于
    多网关 CGNAT 的典型表现。现在做 **5 轮取证，只有 5/5 一致才下结论**，
    否则明确报"行为不一致（可能位于多网关 CGNAT）"。
 

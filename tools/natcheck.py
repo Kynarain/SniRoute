@@ -27,6 +27,7 @@ import socket
 import ssl
 import struct
 import sys
+from pathlib import Path
 import time
 import urllib.request
 
@@ -57,7 +58,8 @@ IP_SOURCES = [
     ("api.ip.sb", "/ip"),
 ]
 
-CA_FILE = r"C:\Users\kynar\AppData\Local\Sniroute\ca\rootCA.crt"
+CA_FILE = (Path(os.environ.get("LOCALAPPDATA", Path.home() / "AppData" / "Local"))
+           / "Sniroute" / "ca" / "rootCA.crt")
 
 
 # --------------------------------------------------------------------------
