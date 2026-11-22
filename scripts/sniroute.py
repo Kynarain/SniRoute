@@ -877,8 +877,13 @@ SITES_JSON = ROOT / "data" / "sites.json"
 
 def cmd_doh(args) -> None:
     action = args.action
+
     # 后端在 5454；5444 是 nginx 前置，不是我们管的进程。
     pid = port_listener_pid(DOH_INTERNAL_PORT)
+
+    if action == "export":
+        cmd_warp_export(args)
+        return
 
     if action == "status":
         print(f"DoH 后端 :{DOH_INTERNAL_PORT} {"running (pid " + str(pid) + ")" if pid else "not running"}")
@@ -1575,6 +1580,181 @@ def cmd_check(args) -> None:
 
 
 
+
+# ---------------------------------------------------------------- WARP 账号与导出
+#
+# 官方 WARP 客户端不导出配置，wgcf 能导出但要额外装一个 Go 工具。
+# 这里直接自己注册：Cloudflare 的注册接口就是一个 POST + 我们生成的 Curve25519 公钥。
+# 密钥用 tools/x25519.py（纯 Python，RFC 7748 测试向量已通过）。
+WARP_ACCOUNT = ROOT / "data" / "warp-account.json"
+
+
+def _load_x25519():
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("sniroute_x25519", ROOT / "tools" / "x25519.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def warp_register() -> dict | None:
+    """注册一个 WARP 账号并返回账号信息；失败返回 None。
+
+    传输层用 curl.exe：实测 Python 的 urllib 会被直接 RST（TLS 指纹差异），
+    而 curl 与 Go 客户端都能过。curl 在 Win10 1803+ 是系统自带。
+    """
+    import base64
+    import datetime
+    import json
+    import tempfile
+
+    x = _load_x25519()
+    priv, pub = x.generate_keypair()
+    body = {
+        "key": base64.b64encode(pub).decode(),
+        "install_id": "",
+        "fcm_token": "",
+        "tos": datetime.datetime.now(datetime.timezone.utc)
+                .isoformat(timespec="milliseconds").replace("+00:00", "Z"),
+        "model": "PC",
+        "type": "Windows",
+        "locale": "en_US",
+    }
+    tmp = Path(tempfile.gettempdir())
+    body_file = tmp / "sniroute-warp-reg.json"
+    resp_file = tmp / "sniroute-warp-reg-resp.json"
+    body_file.write_text(json.dumps(body), encoding="utf-8")
+
+    for ver in ("v0a2158", "v0i1909051800"):
+        url = f"https://api.cloudflareclient.com/{ver}/reg"
+        try:
+            proc = subprocess.run(
+                ["curl.exe", "-s", "-m", "25", "--ssl-no-revoke",
+                 "-o", str(resp_file), "-w", "%{http_code}",
+                 "-X", "POST", "-H", "Content-Type: application/json",
+                 "-H", "User-Agent: okhttp/3.12.1",
+                 "--data-binary", f"@{body_file}", url],
+                capture_output=True, text=True, timeout=40)
+        except Exception:
+            continue
+        if (proc.stdout or "").strip() != "200":
+            continue
+        try:
+            doc = json.loads(resp_file.read_text(encoding="utf-8"))
+            peer = doc["config"]["peers"][0]
+            iface = doc["config"]["interface"]
+        except Exception:
+            continue
+        acct = {
+            "private_key": base64.b64encode(priv).decode(),
+            "peer_public_key": peer["public_key"],
+            "client_public_key": base64.b64encode(pub).decode(),
+            "addresses": iface.get("addresses", {}),
+            "client_id": doc.get("client_id", ""),
+            "registered_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        }
+        WARP_ACCOUNT.write_text(json.dumps(acct, indent=2), encoding="utf-8")
+        return acct
+    return None
+
+
+def _warp_yaml(acct: dict, endpoints: list[tuple[str, int]]) -> str:
+    addrs = acct.get("addresses") or {}
+    v4 = addrs.get("v4", "172.16.0.2")
+    v6 = addrs.get("v6", "")
+    blocks = []
+    for i, (host, port) in enumerate(endpoints, 1):
+        name = "WARP" if i == 1 else f"WARP-{i}"
+        block = [
+            f"  - name: {name}",
+            "    type: wireguard",
+            f"    server: {host}",
+            f"    port: {port}",
+            f"    ip: {v4}",
+        ]
+        if v6:
+            block.append(f"    ipv6: {v6}")
+        block += [
+            f'    private-key: "{acct["private_key"]}"',
+            f'    public-key: "{acct["peer_public_key"]}"',
+            "    udp: true",
+            "    mtu: 1280",
+            "    remote-dns-resolve: true",
+            "    dns: [1.1.1.1, 1.0.0.1]",
+        ]
+        blocks.append("\n".join(block))
+    names = ", ".join(("WARP" if i == 1 else f"WARP-{i}") for i in range(1, len(endpoints) + 1))
+    joined = "\n".join(blocks)
+    return f"""# Cloudflare WARP for Clash Meta —— 由 sniroute.cmd warp export 生成
+# 账号是本机注册的真实 WARP 账号；文件含私钥，别外传，别提交到仓库。
+mixed-port: 7890
+allow-lan: false
+mode: rule
+log-level: info
+ipv6: false
+
+dns:
+  enable: true
+  ipv6: false
+  enhanced-mode: fake-ip
+  fake-ip-range: 198.18.0.1/16
+  nameserver:
+    - 223.5.5.5
+    - 119.29.29.29
+  proxy-server-nameserver:
+    - 223.5.5.5
+
+proxies:
+{joined}
+
+proxy-groups:
+  - name: PROXY
+    type: fallback
+    proxies: [{names}]
+    url: https://www.gstatic.com/generate_204
+    interval: 300
+
+rules:
+  - MATCH,PROXY
+"""
+
+
+def cmd_warp_export(args) -> None:
+    import json
+
+    acct = None
+    if WARP_ACCOUNT.is_file() and not args.renew:
+        try:
+            acct = json.loads(WARP_ACCOUNT.read_text(encoding="utf-8"))
+            print(f"复用本机 WARP 账号：{WARP_ACCOUNT}")
+        except Exception:
+            acct = None
+    if acct is None:
+        print("向 Cloudflare 注册新的 WARP 账号…")
+        acct = warp_register()
+        if acct is None:
+            die("注册失败：无法访问 api.cloudflareclient.com（可能被网络拦截）。\n"
+                "      可改用 wgcf：wgcf register --accept-tos && wgcf generate\n"
+                "      再用 tools/wgcf-to-clash.py 转换。")
+        print(f"  已保存账号：{WARP_ACCOUNT}")
+
+    endpoints = []
+    for raw in (args.endpoint or []):
+        host, _, port = raw.partition(":")
+        try:
+            endpoints.append((host, int(port or 2408)))
+        except ValueError:
+            die(f"端点格式应为 IP:PORT，收到 {raw!r}")
+    if not endpoints:
+        endpoints = [("162.159.192.1", 2408), ("162.159.193.10", 2408)]
+
+    out = Path(args.output or (ROOT / "dist" / "warp-clash.yaml"))
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(_warp_yaml(acct, endpoints), encoding="utf-8")
+    print(f"已生成 {out}")
+    print("  导入方式：Clash 客户端 -> 配置 -> 从文件导入")
+    print("  注意：文件含 WARP 私钥，等同账号凭据，不要外传")
+
 # ---------------------------------------------------------------- WARP
 # Cloudflare WARP 客户端（warp-cli）不装在我们目录里，位置是固定的 Program Files。
 # 它默认走 MASQUE(HTTP/3)，国内经常握手成功但流量不通；实测换成 WireGuard 协议
@@ -1698,6 +1878,11 @@ def warp_install(use_winget: bool = True) -> bool:
 def cmd_warp(args) -> None:
     action = args.action
 
+    # export 不依赖本地客户端（自己注册账号 + 生成 YAML），放在最前面。
+    if action == "export":
+        cmd_warp_export(args)
+        return
+
     # install 必须在"客户端未安装就早退"之前处理 —— 它的目的正是装客户端。
     if action == "install":
         ok = warp_install(use_winget=not args.no_winget)
@@ -1806,10 +1991,12 @@ def main() -> None:
     p.set_defaults(func=cmd_relay)
 
     p = sub.add_parser("warp", help="Cloudflare WARP 开关（给 Sniroute 加一条墙外出口）")
-    p.add_argument("action", choices=["status", "on", "off", "endpoint", "install"])
+    p.add_argument("action", choices=["status", "on", "off", "endpoint", "install", "export"])
     p.add_argument("endpoint", nargs="?", default="", help="action=endpoint 时的 IP:端口")
     p.add_argument("--no-winget", action="store_true",
                    help="install 时跳过 winget，直接用 Cloudflare 官方安装包")
+    p.add_argument("-o", "--output", default="", help="export 时输出路径")
+    p.add_argument("--renew", action="store_true", help="export 时重新注册 WARP 账号")
     p.set_defaults(func=cmd_warp)
 
     p = sub.add_parser("site", help="判断一个域名能不能被本工具支持，并给出该用的模式")

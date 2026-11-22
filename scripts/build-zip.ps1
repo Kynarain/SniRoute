@@ -57,7 +57,16 @@ if (Test-Path $certs) { Remove-Item $certs -Recurse -Force }
 
 $ReusePy = Join-Path $RepoRoot 'build\package\Sniroute\python'
 if (Test-Path (Join-Path $ReusePy 'python.exe')) {
-    Copy-Item $ReusePy (Join-Path $Stage 'python') -Recurse -Force
+    # 敏感运行期文件绝不能进发布包：WARP 账号含私钥，DoH 缓存含浏览记录。
+foreach ($leak in @('data\warp-account.json', 'data\doh-cache.json', 'data\doh-cache.tmp')) {
+    $lp = Join-Path $Stage $leak
+    if (Test-Path $lp) {
+        Remove-Item $lp -Force -ErrorAction SilentlyContinue
+        Write-Host ("  removed sensitive: " + $leak)
+    }
+}
+
+Copy-Item $ReusePy (Join-Path $Stage 'python') -Recurse -Force
 } else {
     Fail 'no trimmed python runtime (run build-package.ps1 once to create it)'
 }

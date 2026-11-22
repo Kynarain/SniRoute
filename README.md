@@ -1267,6 +1267,33 @@ DoH 占着会直接 `die`，用户只看到"起不来"。现在先 `taskkill` �
 Windows 上 WARP 与 Sniroute 可以同时开；Android 上只能二选一（系统限制一个 VPN）。
 
 
+
+## 一条命令生成 Clash 的 WARP 配置（3.11.0）
+
+不用装 wgcf：
+
+```powershell
+sniroute.cmd warp export                       # 自动注册账号并生成 dist\warp-clash.yaml
+sniroute.cmd warp export -o D:\warp.yaml      # 指定输出
+sniroute.cmd warp export --renew               # 重新注册一个账号
+sniroute.cmd warp export --endpoint 162.159.193.10:2408
+```
+
+它做的事：
+
+1. 用 `tools/x25519.py`（纯 Python，RFC 7748 测试向量已验证）生成 Curve25519 密钥对
+2. 向 `api.cloudflareclient.com` 注册，拿到 `172.16.0.2/32` 隧道地址与对端公钥
+3. 把账号存到 `data/warp-account.json`（**已 gitignore，且打包时会被剔除**）
+4. 生成完整 Clash 配置（含 fake-ip DNS、fallback 组、`MATCH,PROXY`）
+
+**传输层为什么用 curl**：实测 Python 的 urllib 请求会被直接 RST（TLS 指纹差异），
+curl 与 Go 客户端都能过，所以注册走 `curl.exe`（Win10 1803+ 自带）。
+
+托盘菜单里也有：`WARP 出口 -> 导出 Clash YAML (WARP)`。
+
+**安全**：生成的文件含 WARP 私钥，等同账号凭据。构建脚本会在打包前剔除
+`data/warp-account.json` 与 `data/doh-cache.json`，所以安装包里不会带别人的账号。
+
 ## WARP 配置转 Clash YAML
 
 Cloudflare 官方客户端**不导出配置**。要拿到 WARP 的 WireGuard 参数，只能用

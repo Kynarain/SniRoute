@@ -67,7 +67,17 @@ $signCer = Join-Path $RepoRoot 'ca\codesign.cer'
 if (Test-Path $signCer) { Copy-Item $signCer (Join-Path $Payload 'codesign.cer') -Force }
 
 foreach ($junk in @('logs', 'temp', 'chromeprofile', '__pycache__')) {
-    Get-ChildItem $Payload -Recurse -Directory -Filter $junk -ErrorAction SilentlyContinue |
+    # 敏感运行期文件绝不能进安装包：WARP 账号含私钥，DoH 缓存含浏览记录。
+# 这些都是本机生成的，用户自己跑一次 export 就有了。
+foreach ($leak in @('data\warp-account.json', 'data\doh-cache.json', 'data\doh-cache.tmp')) {
+    $lp = Join-Path $Payload $leak
+    if (Test-Path $lp) {
+        Remove-Item $lp -Force -ErrorAction SilentlyContinue
+        Step ("  removed sensitive: " + $leak)
+    }
+}
+
+Get-ChildItem $Payload -Recurse -Directory -Filter $junk -ErrorAction SilentlyContinue |
         Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
 }
 $certs = Join-Path $Payload 'conf\certs'

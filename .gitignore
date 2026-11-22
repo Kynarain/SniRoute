@@ -54,3 +54,8 @@ warp-clash.yaml
 .idea/
 .DS_Store
 Thumbs.db
+
+# WARP 账号（含私钥）与 DoH 运行期缓存
+data/warp-account.json
+data/doh-cache.json
+data/*.tmp

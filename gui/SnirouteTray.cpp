@@ -60,6 +60,7 @@ constexpr UINT IDM_NAT = 1012;      // NAT type check
 constexpr UINT IDM_WARP_ON = 1016;      // connect Cloudflare WARP
 constexpr UINT IDM_WARP_OFF = 1017;     // disconnect Cloudflare WARP
 constexpr UINT IDM_WARP_INSTALL = 1018; // one-click winget install
+constexpr UINT IDM_WARP_EXPORT = 1019;  // export Clash YAML
 constexpr UINT WM_WARP_INSTALL_DONE = WM_APP + 22;
 constexpr UINT IDM_REVERT = 1006;
 constexpr UINT IDM_LOG = 1007;
@@ -879,7 +880,7 @@ void RunWarpHealthCheck() {
 }
 
 // ---------------------------------------------------------------- status rows
-constexpr wchar_t kAppVersion[] = L"3.10.10";
+constexpr wchar_t kAppVersion[] = L"3.11.0";
 
 // NRPT rule installed? Same key the installer writes, so status cannot lie.
 bool NrptInstalled() {
@@ -1104,6 +1105,9 @@ void ShowMenu() {
             AppendMenuW(warpMenu, MF_SEPARATOR, 0, nullptr);
             AppendMenuW(warpMenu, MF_STRING, IDM_WARP_ON, g_str.get(L"warp_connect", L"Connect WARP"));
             AppendMenuW(warpMenu, MF_STRING, IDM_WARP_OFF, g_str.get(L"warp_disconnect", L"Disconnect WARP"));
+            AppendMenuW(warpMenu, MF_SEPARATOR, 0, nullptr);
+            AppendMenuW(warpMenu, MF_STRING, IDM_WARP_EXPORT,
+                        g_str.get(L"warp_export", L"Export Clash YAML (WARP)"));
         }
         AppendMenuW(menu, MF_POPUP, reinterpret_cast<UINT_PTR>(warpMenu),
                     g_str.get(L"menu_warp", L"WARP (exit)"));
@@ -1240,6 +1244,26 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         case IDM_NAT:
             RunNatProbe();
             return 0;
+        case IDM_WARP_EXPORT: {
+            // 导出不依赖客户端：CLI 会自己注册 WARP 账号并写 YAML。
+            std::wstring cmd = L"cmd.exe /c \"\"" + g_cliPath + L"\" warp export\"";
+            STARTUPINFOW si{};
+            si.cb = sizeof(si);
+            si.dwFlags = STARTF_USESHOWWINDOW;
+            si.wShowWindow = SW_HIDE;
+            PROCESS_INFORMATION pi{};
+            std::wstring w = cmd;
+            if (CreateProcessW(nullptr, w.data(), nullptr, nullptr, FALSE, CREATE_NO_WINDOW,
+                               nullptr, g_root.c_str(), &si, &pi)) {
+                CloseHandle(pi.hProcess);
+                CloseHandle(pi.hThread);
+                Balloon(g_str.get(L"tip", L"sniroute"),
+                        g_str.get(L"warp_export_msg",
+                                  L"Exporting WARP config to: (install dir)\dist\warp-clash.yaml"),
+                        NIIF_INFO);
+            }
+            return 0;
+        }
         case IDM_WARP_INSTALL:
             RunWarpInstall();
             return 0;
