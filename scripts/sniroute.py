@@ -1154,6 +1154,99 @@ def cmd_nat(args) -> None:
 
 
 
+
+# ---------------------------------------------------------------- 检查更新
+REPO_SLUG = "Kynarain/SniRoute"
+VERSION_FILE = ROOT / "data" / "version.txt"
+
+
+def local_version() -> str:
+    try:
+        return VERSION_FILE.read_text(encoding="utf-8").strip() or "unknown"
+    except Exception:
+        return "unknown"
+
+
+def _remote_version_via_gh() -> tuple[str | None, str]:
+    """用 gh CLI 读仓库里的 data/version.txt。私有仓库需要认证，
+    gh 已登录时最省事。返回 (version, 错误说明)。"""
+    import subprocess as _sp
+    try:
+        proc = _sp.run(["gh", "api", f"repos/{REPO_SLUG}/contents/data/version.txt",
+                        "-H", "Accept: application/vnd.github.raw"],
+                       capture_output=True, text=True, timeout=25)
+        if proc.returncode == 0 and proc.stdout.strip():
+            return proc.stdout.strip().splitlines()[0], ""
+        return None, (proc.stderr or "").strip()[:120] or f"gh 退出码 {proc.returncode}"
+    except FileNotFoundError:
+        return None, "未安装 gh"
+    except Exception as exc:
+        return None, f"{type(exc).__name__}: {exc}"
+
+
+def _remote_version_via_token() -> tuple[str | None, str]:
+    """没有 gh 时，用环境变量里的 GITHUB_TOKEN/GH_TOKEN 直接调 API。"""
+    import os as _os
+    import urllib.request as _ur
+    token = _os.environ.get("GITHUB_TOKEN") or _os.environ.get("GH_TOKEN")
+    if not token:
+        return None, "未设置 GITHUB_TOKEN/GH_TOKEN"
+    url = f"https://api.github.com/repos/{REPO_SLUG}/contents/data/version.txt"
+    req = _ur.Request(url, headers={
+        "Authorization": f"Bearer {token}",
+        "Accept": "application/vnd.github.raw",
+        "User-Agent": "sniroute-update-check",
+    })
+    try:
+        with _ur.urlopen(req, timeout=25) as resp:
+            return resp.read().decode("utf-8", "replace").strip(), ""
+    except Exception as exc:
+        return None, f"{type(exc).__name__}: {exc}"
+
+
+def _semver_tuple(v: str) -> tuple:
+    parts = []
+    for piece in str(v).strip().lstrip("v").split("."):
+        digits = "".join(ch for ch in piece if ch.isdigit())
+        parts.append(int(digits) if digits else 0)
+    while len(parts) < 3:
+        parts.append(0)
+    return tuple(parts[:3])
+
+
+def cmd_update(args) -> None:
+    local = local_version()
+    remote, err = _remote_version_via_gh()
+    via = "gh"
+    if not remote:
+        remote, err2 = _remote_version_via_token()
+        via = "token"
+        if not remote:
+            err = err or err2
+
+    if args.json:
+        print(json.dumps({"local": local, "remote": remote, "via": via, "error": err},
+                         ensure_ascii=False, indent=2))
+        return
+    if not remote:
+        print(f"本地版本 : {local}")
+        print(f"无法检查   : {err}")
+        print("该仓库是私有的，需要：")
+        print("  - 已登录的 gh CLI（gh auth login），或")
+        print("  - 环境变量 GITHUB_TOKEN（最小 scope: repo 或 contents:read）")
+        return
+
+    print(f"本地版本 : {local}")
+    print(f"远端版本 : {remote}   （来源：{via}）")
+    if _semver_tuple(remote) > _semver_tuple(local):
+        print(f"有新版本 : {remote}（当前 {local}）")
+        print(f"下载页   : https://github.com/{REPO_SLUG}/releases")
+        print("（若仓库没有 Release，直接拉 main 分支的 dist 目录，或用自己的构建产物）")
+    elif _semver_tuple(remote) == _semver_tuple(local):
+        print("已是最新版本。")
+    else:
+        print(f"本地版本比远端新（{local} > {remote}），可能是未推送的开发版。")
+
 def cmd_up(args) -> None:
     """把这条链路需要的组件按依赖顺序拉起来，并做一次健康检查。"""
     problems: list[str] = []
@@ -1998,6 +2091,11 @@ def main() -> None:
     p.add_argument("-o", "--output", default="", help="export 时输出路径")
     p.add_argument("--renew", action="store_true", help="export 时重新注册 WARP 账号")
     p.set_defaults(func=cmd_warp)
+
+    p = sub.add_parser("update", help="检查是否有新版本")
+    p.add_argument("action", choices=["check"], nargs="?", default="check")
+    p.add_argument("--json", action="store_true")
+    p.set_defaults(func=cmd_update)
 
     p = sub.add_parser("site", help="判断一个域名能不能被本工具支持，并给出该用的模式")
     p.add_argument("domain")

@@ -54,6 +54,8 @@ if ($LASTEXITCODE -ne 0) { Fail 'tray build failed' }
 $TrayExe = Join-Path $RepoRoot 'build\tray\Sniroute.exe'
 if (-not (Test-Path $TrayExe)) { Fail "missing $TrayExe" }
 
+# 版本文件：安装后 sniroute.cmd update check 靠它判断本地版本。
+[System.IO.File]::WriteAllText((Join-Path $RepoRoot 'data\version.txt'), $Version, (New-Object System.Text.UTF8Encoding($false)))
 Step 'stage payload'
 if (Test-Path $BuildDir) { Remove-Item $BuildDir -Recurse -Force }
 New-Item -ItemType Directory -Path $Payload -Force | Out-Null

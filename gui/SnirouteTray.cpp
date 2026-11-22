@@ -61,6 +61,8 @@ constexpr UINT IDM_WARP_ON = 1016;      // connect Cloudflare WARP
 constexpr UINT IDM_WARP_OFF = 1017;     // disconnect Cloudflare WARP
 constexpr UINT IDM_WARP_INSTALL = 1018; // one-click winget install
 constexpr UINT IDM_WARP_EXPORT = 1019;  // export Clash YAML
+constexpr UINT IDM_UPDATE = 1020;       // check for updates
+constexpr UINT WM_UPDATE_DONE = WM_APP + 23;
 constexpr UINT WM_WARP_INSTALL_DONE = WM_APP + 22;
 constexpr UINT IDM_REVERT = 1006;
 constexpr UINT IDM_LOG = 1007;
@@ -880,7 +882,7 @@ void RunWarpHealthCheck() {
 }
 
 // ---------------------------------------------------------------- status rows
-constexpr wchar_t kAppVersion[] = L"3.11.3";
+constexpr wchar_t kAppVersion[] = L"3.12.0";
 
 // NRPT rule installed? Same key the installer writes, so status cannot lie.
 bool NrptInstalled() {
@@ -1083,6 +1085,7 @@ void ShowMenu() {
     AppendMenuW(menu, MF_STRING, IDM_UP, g_str.get(L"menu_up", L"Start all"));
     AppendMenuW(menu, MF_STRING, IDM_DOWN, g_str.get(L"menu_down", L"Stop all"));
     AppendMenuW(menu, MF_STRING, IDM_STATUS, g_str.get(L"menu_status", L"Status"));
+    AppendMenuW(menu, MF_STRING, IDM_UPDATE, g_str.get(L"menu_update", L"Check for updates"));
     AppendMenuW(menu, MF_STRING, IDM_NAT, g_str.get(L"menu_nat", L"NAT type check"));
     {
         // WARP 子菜单：给 Sniroute 加一条墙外出口（Google/YouTube/Play 网页版）。
@@ -1147,6 +1150,8 @@ void ShowMenu() {
 }
 
 // ---------------------------------------------------------------- window proc
+void RunUpdateCheck();   // defined later in this namespace
+
 LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     if (msg == g_taskbarCreated && g_taskbarCreated != 0) {
         // Explorer restarted: re-add the icon or it silently disappears.
@@ -1241,6 +1246,9 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                        L"Upstream addresses refreshed", L"Refresh failed (%d)",
                        nullptr});
             return 0;
+        case IDM_UPDATE:
+            RunUpdateCheck();
+            return 0;
         case IDM_NAT:
             RunNatProbe();
             return 0;
@@ -1307,6 +1315,15 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                     g_str.get(L"warp_install_fail",
                               L"WARP install failed. Run manually: winget install Cloudflare.Warp"),
                     NIIF_WARNING);
+        }
+        return 0;
+    }
+
+    case WM_UPDATE_DONE: {
+        std::wstring* p = reinterpret_cast<std::wstring*>(lp);
+        if (p) {
+            Balloon(g_str.get(L"tip", L"sniroute"), *p, NIIF_INFO);
+            delete p;
         }
         return 0;
     }
@@ -1401,6 +1418,79 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         break;
     }
     return DefWindowProcW(hwnd, msg, wp, lp);
+}
+
+
+// 检查更新：跑 sniroute.cmd update check，把输出贴到气泡里。
+// 需要访问 GitHub API（私有仓库要认证），所以放后台线程，不能卡住托盘。
+void RunUpdateCheck() {
+    Balloon(g_str.get(L"tip", L"sniroute"),
+            g_str.get(L"update_checking", L"Checking for updates..."), NIIF_INFO);
+    CreateThread(nullptr, 0, [](LPVOID) -> DWORD {
+        std::wstring cmdline = L"cmd.exe /c \"\"" + g_cliPath + L"\" update check 2>&1\"";
+        SECURITY_ATTRIBUTES sa{sizeof(sa), nullptr, TRUE};
+        HANDLE readEnd = nullptr, writeEnd = nullptr;
+        if (!CreatePipe(&readEnd, &writeEnd, &sa, 0)) {
+            PostMessageW(g_hwnd, WM_UPDATE_DONE, 0,
+                         (LPARAM)new std::wstring(L"Update check failed"));
+            return 1;
+        }
+        SetHandleInformation(readEnd, HANDLE_FLAG_INHERIT, 0);
+        STARTUPINFOW si{};
+        si.cb = sizeof(si);
+        si.dwFlags = STARTF_USESTDHANDLES | STARTF_USESHOWWINDOW;
+        si.wShowWindow = SW_HIDE;
+        si.hStdOutput = writeEnd;
+        si.hStdError = writeEnd;
+        PROCESS_INFORMATION pi{};
+        std::wstring wcmd = cmdline;
+        BOOL started = CreateProcessW(nullptr, wcmd.data(), nullptr, nullptr, TRUE,
+                                      CREATE_NO_WINDOW, nullptr, g_root.c_str(), &si, &pi);
+        CloseHandle(writeEnd);
+        if (!started) {
+            CloseHandle(readEnd);
+            PostMessageW(g_hwnd, WM_UPDATE_DONE, 0,
+                         (LPARAM)new std::wstring(L"Update check failed"));
+            return 1;
+        }
+        std::string raw;
+        char buf[1024];
+        DWORD got = 0;
+        while (ReadFile(readEnd, buf, sizeof(buf), &got, nullptr) && got > 0) raw.append(buf, got);
+        CloseHandle(readEnd);
+        WaitForSingleObject(pi.hProcess, 60000);
+        CloseHandle(pi.hProcess);
+        CloseHandle(pi.hThread);
+
+        std::wstring text;
+        if (!raw.empty()) {
+            int need = MultiByteToWideChar(CP_UTF8, 0, raw.data(), (int)raw.size(), nullptr, 0);
+            if (need > 0) {
+                text.resize((size_t)need);
+                MultiByteToWideChar(CP_UTF8, 0, raw.data(), (int)raw.size(), text.data(), need);
+            }
+        }
+        // 气泡放不下多行：只保留前两行有效内容。
+        std::wstring brief;
+        int lines = 0;
+        size_t pos = 0;
+        while (pos < text.size() && lines < 2) {
+            size_t nl = text.find(L'\n', pos);
+            std::wstring one = text.substr(pos, nl == std::wstring::npos ? std::wstring::npos : nl - pos);
+            while (!one.empty() && (one.back() == L'\r' || one.back() == L' ')) one.pop_back();
+            if (!one.empty()) {
+                if (!brief.empty()) brief += L"\n";
+                brief += one;
+                ++lines;
+            }
+            if (nl == std::wstring::npos) break;
+            pos = nl + 1;
+        }
+        if (brief.empty()) brief = L"Update check failed";
+        Log(L"[update] " + brief);
+        PostMessageW(g_hwnd, WM_UPDATE_DONE, 0, (LPARAM)new std::wstring(brief));
+        return 0;
+    }, nullptr, 0, nullptr);
 }
 
 bool CommandLineHas(const wchar_t* flag) {
