@@ -376,7 +376,7 @@ def _a_records(answer: bytes) -> list:
     return out
 
 
-def _filter_reachable(query: bytes, qend: int, answer: bytes) -> bytes:
+def _filter_reachable(query: bytes, qend: int, answer: bytes, timeout: float = 3.0) -> bytes:
     """把 DoH 给出的 A 记录做一次 TCP 443 探活，只保留能连上的。
 
     为什么需要：DNS 只说明"这个域名现在解析到这些地址"，不保证这些地址在你这条
@@ -398,8 +398,8 @@ def _filter_reachable(query: bytes, qend: int, answer: bytes) -> bytes:
         probe_host = ""
     with _cf.ThreadPoolExecutor(max_workers=len(ips)) as pool:
         results = list(pool.map(
-            lambda ip: (ip, _tls_ok(str(ip), probe_host, 3.0) if probe_host
-                        else _tcp_ok(str(ip), 443, 1.6)), ips))
+            lambda ip: (ip, _tls_ok(str(ip), probe_host, timeout) if probe_host
+                        else _tcp_ok(str(ip), 443, min(1.6, timeout))), ips))
     good = [ip for ip, ok in results if ok]
     if len(good) == len(ips):
         return answer
@@ -411,7 +411,7 @@ def _filter_reachable(query: bytes, qend: int, answer: bytes) -> bytes:
         import concurrent.futures as _cf2
         with _cf2.ThreadPoolExecutor(max_workers=len(ips)) as pool2:
             tcp_hits = [ip for ip, ok in pool2.map(
-                lambda ip: (ip, _tcp_ok(str(ip), 443, 1.6)), ips) if ok]
+                lambda ip: (ip, _tcp_ok(str(ip), 443, min(1.6, timeout))), ips) if ok]
         if tcp_hits:
             emit(f"[dns] TLS 全超时，但 {len(tcp_hits)} 个地址 TCP 可达，按冷启动处理返回")
             return build_response(query, qend, [(TYPE_A, ipaddress.IPv4Address(ip).packed, 60)
@@ -533,9 +533,24 @@ def answer_query(query: bytes, plain: bool = False) -> bytes:
     # 我们用 DoH 拿到真实地址，浏览器照常直连，证书是对方的真证书，
     # 因此既不需要本机终结 TLS，也不需要签发任何证书。
     if entry.get("mode") == "dns":
+        # 站点表里的 ips 是逐个握手验证过的实测地址，优先用它：
+        #   * 不依赖上游（快）；
+        #   * 不会被投毒答案污染（实测明文路径里 github.com 曾返回 57.155.223.240）；
+        #   * 系统解析器（游戏/桌面程序）也能拿到正确地址。
+        known = entry.get("ips") or []
+        if qtype == TYPE_A and known:
+            answers = [(TYPE_A, ipaddress.IPv4Address(ip).packed, 60) for ip in known]
+            return build_response(query, qend, answers)
         resp = forward(query)
-        # 只修解析，不做代理；但要保证给出的地址在本机确实能连上。
-        return _filter_reachable(query, qend, resp)
+        # 可达性过滤只对"浏览器 DoH"有好处：把连不上的地址剔掉。
+        # 对系统解析器（游戏、桌面程序）必须跳过：
+        #   * _filter_reachable 会对每个地址做一次 TCP 探测，8 个地址就是 8 次，
+        #     单个查询能拖到好几秒；
+        #   * 明文 DNS 监听是串行处理的，一条慢查询会把后面所有查询一起堵住
+        #     （实测表现：所有域名解析超时，游戏报"无法连接服务器"）。
+        # 系统解析器要的是"快且真实"，连不上是客户端自己的事。
+        # 探活是并行做的，超时即总耗时：系统解析器用 1 秒，浏览器用 3 秒。
+        return _filter_reachable(query, qend, resp, 1.0 if plain else 3.0)
 
     # 明文 DNS（全局模式）没有可信通道，ECH 配置不可信，因此一律把流量引回本机，
     # 由 nginx 终结 TLS；DoH 路径仍然按站点的 dns_mode 走 ECH。
@@ -686,6 +701,7 @@ def serve_dns_plain(host: str, port: int) -> None:
     UDP 和 TCP 都要开：系统解析器默认 UDP，响应被截断时会改用 TCP。
     """
     import threading
+    from concurrent.futures import ThreadPoolExecutor
 
     def udp_loop() -> None:
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -696,18 +712,28 @@ def serve_dns_plain(host: str, port: int) -> None:
             emit(f"[dns] UDP {host}:{port} 绑定失败: {exc}")
             return
         emit(f"[dns] 明文 DNS 监听 udp://{host}:{port}")
+        # 每条查询交给线程池：单条慢查询（上游超时）不能把后面所有查询堵住。
+        # 之前是串行处理，实测一条慢查询会让整个系统解析超时，游戏直接报错。
+        pool = ThreadPoolExecutor(max_workers=8, thread_name_prefix="dns-udp")
+
+        def handle(data: bytes, addr):
+            try:
+                resp = answer_query(data, plain=True)
+            except Exception as exc:
+                emit(f"[dns] 处理失败: {exc}")
+                return
+            if resp:
+                try:
+                    sock.sendto(resp, addr)
+                except OSError:
+                    pass
+
         while True:
             try:
                 data, addr = sock.recvfrom(4096)
             except OSError:
                 continue
-            try:
-                resp = answer_query(data, plain=True)
-            except Exception as exc:
-                emit(f"[dns] 处理失败: {exc}")
-                continue
-            if resp:
-                sock.sendto(resp, addr)
+            pool.submit(handle, data, addr)
 
     def tcp_loop() -> None:
         srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -719,16 +745,14 @@ def serve_dns_plain(host: str, port: int) -> None:
             emit(f"[dns] TCP {host}:{port} 绑定失败: {exc}")
             return
         emit(f"[dns] 明文 DNS 监听 tcp://{host}:{port}")
-        while True:
-            try:
-                conn, _ = srv.accept()
-            except OSError:
-                continue
+        tcp_pool = ThreadPoolExecutor(max_workers=8, thread_name_prefix="dns-tcp")
+
+        def handle_conn(conn):
             with conn:
                 try:
                     head = conn.recv(2)
                     if len(head) < 2:
-                        continue
+                        return
                     want = int.from_bytes(head, "big")
                     body = b""
                     while len(body) < want:
@@ -741,6 +765,13 @@ def serve_dns_plain(host: str, port: int) -> None:
                         conn.sendall(len(resp).to_bytes(2, "big") + resp)
                 except Exception as exc:
                     emit(f"[dns] TCP 处理失败: {exc}")
+
+        while True:
+            try:
+                conn, _ = srv.accept()
+            except OSError:
+                continue
+            tcp_pool.submit(handle_conn, conn)
 
     threading.Thread(target=udp_loop, name="dns-udp", daemon=True).start()
     threading.Thread(target=tcp_loop, name="dns-tcp", daemon=True).start()
