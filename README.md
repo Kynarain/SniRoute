@@ -1266,6 +1266,44 @@ DoH 占着会直接 `die`，用户只看到"起不来"。现在先 `taskkill` �
 **注意**：WARP 在国内时通时不通；不通时先试换端点，仍不行再考虑自建 VPS。
 Windows 上 WARP 与 Sniroute 可以同时开；Android 上只能二选一（系统限制一个 VPN）。
 
+
+## WARP 配置转 Clash YAML
+
+Cloudflare 官方客户端**不导出配置**。要拿到 WARP 的 WireGuard 参数，只能用
+[wgcf](https://github.com/ViRb3/wgcf) 注册一个真实 WARP 账号：
+
+```powershell
+winget install ViRb3.wgcf
+wgcf register --accept-tos    # 生成 wgcf-account.toml
+wgcf generate                 # 生成 wgcf-profile.conf
+```
+
+`.conf` 是标准 WireGuard 格式，Clash 用的是自己的 YAML 结构，字段名不同，
+手抄容易漏（漏 `remote-dns-resolve` 就会出现"已连接但域名解析错"）。仓库里带了一个转换脚本：
+
+```powershell
+python tools\wgcf-to-clash.py wgcf-profile.conf -o warp-clash.yaml
+# 或自动找 %%TEMP%%\wgcf\wgcf-profile.conf
+python tools\wgcf-to-clash.py --auto -o warp-clash.yaml
+# 换端点（可重复）
+python tools\wgcf-to-clash.py --auto --endpoint 162.159.193.10:2408 -o warp-clash.yaml
+```
+
+输出是**完整可导入**的 Clash 配置（含 DNS、fallback 组、MATCH 规则），不是片段。
+
+字段映射关系：
+
+| wgcf-profile.conf | Clash YAML |
+|---|---|
+| `PrivateKey` | `private-key` |
+| `PublicKey` | `public-key` |
+| `Address` 的 IPv4/IPv6 | `ip` / `ipv6` |
+| `Endpoint` 的 host:port | `server` / `port` |
+| `MTU` | `mtu` |
+| `DNS` | `dns` + `remote-dns-resolve: true` |
+
+**注意**：生成的 YAML 里有 WARP 私钥，等同账号凭据，不要提交到仓库或发给别人。
+
 ## 关于哈希文件（3.10.5 起）
 
 不再随产物生成 `.sha256` / `.sha1` / `.md5` 与 `SHA256SUMS.txt` / `SHA1SUMS.txt` / `MD5SUMS.txt`。
