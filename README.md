@@ -1500,6 +1500,28 @@ SNI 和握手指纹。所以对 URL 做编码，从头到尾都不在关键路�
 2. 公共 DoH 对 AAAA 同样投毒——`2a03:2880:*` 是 Facebook 的段，`2001::1` 也不是
    Google 的地址。要拿到真 AAAA 必须走干净的上游（本项目用 Worker DoH）。
 
+
+## 把一个 handshake 消息拆到多个 TLS record 呢？——也不行（有对照实验）
+
+这个和"TCP 分段"是两回事：TLS 协议本身允许一条 handshake 消息跨多个 record
+（RFC 8446 §5.1），所以如果 DPI 只解析第一个 record，就会漏掉 SNI。
+`tools/tls-record-split.py` 直接验证这个假设。
+
+| 目标 | A 单 record | B SNI 前切 | C SNI 中切 | D 首 record 只 1 字节 |
+|---|---|---|---|---|
+| www.pixiv.net（已阻断） | RST | RST | RST | RST |
+| discord.com（已阻断） | RST | RST | RST | RST |
+| www.google.com（已阻断） | RST/超时 | 超时 | 超时 | 超时 |
+| **www.cloudflare.com（对照）** | **3/3 成功** | **3/3** | **3/3** | **3/3** |
+
+关键在最后一行：**同样的拆法，Cloudflare 三次全部正常握手**。这证明：
+1. 拆 record 是**协议合法**的，服务器会正确重组；
+2. 失败不是因为我们把报文写坏了；
+3. **GFW 在 TLS record 层同样做了重组**，只把 SNI 挪到第二个 record 挡不住它。
+
+结论与前几项一致：任何"改变字节布局"的手法都无效，因为对方解析的是完整流；
+只有让内容对它不可见（ECH / QUIC）或换路由（隧道）才成立。
+
 ## 关于哈希文件（3.10.5 起）
 
 不再随产物生成 `.sha256` / `.sha1` / `.md5` 与 `SHA256SUMS.txt` / `SHA1SUMS.txt` / `MD5SUMS.txt`。
