@@ -1481,6 +1481,25 @@ GFW 做的是**有状态重组**（等齐再匹配），所以报文被切成几
 另外，HTTPS 的 URL 路径本来就在加密通道里，审查者看不到，也不需要看——它拦的是
 SNI 和握手指纹。所以对 URL 做编码，从头到尾都不在关键路径上。
 
+
+## IPv6 直连能不能绕过？——不能（实测）
+
+有 IPv6 的网络里，有时 IPv4 被墙而 IPv6 能通。本项目实测（本机 IPv6 可用）：
+
+| 目标 | AAAA 来源 | 结果 |
+|---|---|---|
+| www.baidu.com | 阿里 DoH | IPv6 TLS **OK** |
+| www.taobao.com | 阿里 DoH | IPv6 TLS **OK** |
+| www.google.com | Worker DoH（真实 2001:4860:…） | **超时** |
+| www.pixiv.net / x.com / discord.com / github.com | 阿里 DoH | AAAA 是**投毒值**（2a03:2880 属 Facebook） |
+
+两点结论：
+
+1. 本机 IPv6 栈与国内路由正常（百度/淘宝可通），所以 Google 的超时不是"没有 IPv6"，
+   而是 **IPv6 路径同样被过滤**；
+2. 公共 DoH 对 AAAA 同样投毒——`2a03:2880:*` 是 Facebook 的段，`2001::1` 也不是
+   Google 的地址。要拿到真 AAAA 必须走干净的上游（本项目用 Worker DoH）。
+
 ## 关于哈希文件（3.10.5 起）
 
 不再随产物生成 `.sha256` / `.sha1` / `.md5` 与 `SHA256SUMS.txt` / `SHA1SUMS.txt` / `MD5SUMS.txt`。
