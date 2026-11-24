@@ -1522,6 +1522,28 @@ SNI 和握手指纹。所以对 URL 做编码，从头到尾都不在关键路�
 结论与前几项一致：任何"改变字节布局"的手法都无效，因为对方解析的是完整流；
 只有让内容对它不可见（ECH / QUIC）或换路由（隧道）才成立。
 
+
+## Tor + Snowflake / meek：能不能当备胎？（实测连通性）
+
+| 组件 | DNS | TCP 443 | TLS | 结论 |
+|---|---|---|---|---|
+| snowflake-broker.torproject.net | 37.218.242.175 | 通 | OK | **可达**，Snowflake 有启动可能 |
+| snowflake.torproject.org | 203.161.230.171 | 超时 | — | 被阻断（下载页打不开）|
+| meek.azureedge.net | 解析失败 | — | — | **已失效**（Azure 域前置入口不存在）|
+| a0.awsstatic.com | 3.175.214.13 | 通 | OK | 域名可达，但 AWS 已禁止域前置 |
+| bridges.torproject.org | 31.13.85.53 | 超时 | — | 被阻断 |
+| check.torproject.org | 203.161.230.171 | 超时 | — | 被阻断 |
+
+补充：对 broker 的 `/client` 端点发探针返回 502（无法确认能否真的分配到代理），
+需要装真实客户端才能验证启动。
+
+**结论**：
+
+* **meek 实质已死**——它依赖 CDN 域前置，而 Cloudflare / AWS / Azure 都已封禁；
+* **Snowflake 还是活的**（broker 可达），但代价明显：Tor 出口速度几十到几百 KB/s、
+  延迟 1–3 秒，且大量站点对 Tor 出口 IP 直接给验证码或拒绝；
+* 定位应当是**最后备胎**：纯文本浏览、紧急取一份配置，不适合下载/视频/游戏。
+
 ## 关于哈希文件（3.10.5 起）
 
 不再随产物生成 `.sha256` / `.sha1` / `.md5` 与 `SHA256SUMS.txt` / `SHA1SUMS.txt` / `MD5SUMS.txt`。
