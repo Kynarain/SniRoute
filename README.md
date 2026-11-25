@@ -1573,6 +1573,36 @@ gh run download <run-id> -R Kynarain/SniRoute -n fetch -D .\out
 **边界**：这是"取文件"的通道，不是代理或隧道。runner 是临时环境、没有入向连接，
 把 Actions 当常驻代理/通用计算用违反 GitHub 的 AUP，会导致账号被限制。
 单次取文件属于正常 CI 用法（下载 + 上传 artifact）。
+
+## 用 GitHub Actions 取文件（集成在 `sniroute.cmd` 里）
+
+不用再手动开网页点 workflow：
+
+```powershell
+sniroute.cmd gha status                     # 认证来源 + 仓库 + 最近运行
+sniroute.cmd gha fetch <url> [-o 输出文件] [--name 文件名]
+sniroute.cmd gha runs                       # 最近 10 次运行
+sniroute.cmd gha auth --token <PAT>         # 没有 gh CLI 时保存一个 PAT
+```
+
+`gha fetch` 会：触发仓库里的 `fetch.yml` → 等待完成 → 把 artifact 取回本地。
+
+**认证优先级**：
+
+1. 已登录的 `gh` CLI（推荐，token 由它管理，不落到本项目文件里）
+2. `data/github-token.json` 里的 PAT（`gha auth --token` 写入，已 gitignore）
+
+实测：
+
+```
+已触发（gh CLI）：Kynarain/SniRoute fetch.yml
+等待运行完成…
+已保存 …\gha-fetch-result.md  （3808 字节）
+run id 45615511587
+```
+
+**边界**：这是"取文件"通道，不是代理。把 Actions 当常驻代理违反 GitHub AUP。
+
 ## 关于哈希文件（3.10.5 起）
 
 不再随产物生成 `.sha256` / `.sha1` / `.md5` 与 `SHA256SUMS.txt` / `SHA1SUMS.txt` / `MD5SUMS.txt`。

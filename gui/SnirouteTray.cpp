@@ -882,7 +882,7 @@ void RunWarpHealthCheck() {
 }
 
 // ---------------------------------------------------------------- status rows
-constexpr wchar_t kAppVersion[] = L"3.12.0";
+constexpr wchar_t kAppVersion[] = L"3.13.0";
 
 // NRPT rule installed? Same key the installer writes, so status cannot lie.
 bool NrptInstalled() {

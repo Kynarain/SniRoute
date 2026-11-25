@@ -1214,6 +1214,249 @@ def _semver_tuple(v: str) -> tuple:
     return tuple(parts[:3])
 
 
+
+# ---------------------------------------------------------------- GitHub Actions
+#
+# 用途：把 GitHub 的 runner（墙外）当成"取文件"的通道。
+#   gha fetch <url>   触发仓库里的 fetch.yml 下载，然后把 artifact 取回本地
+#   gha status        看认证来源、仓库、最近几次运行
+#   gha auth --token  保存一个 PAT（没有 gh CLI 时用）
+#
+# 认证顺序：
+#   1) 已登录的 gh CLI（最省事，token 由它管理，不落到我们文件里）
+#   2) data/github-token.json 里的 PAT（本机保存，文件权限由用户自己负责）
+GH_SLUG = "Kynarain/SniRoute"
+GH_TOKEN_FILE = ROOT / "data" / "github-token.json"
+
+
+def _gh_cfg() -> dict:
+    try:
+        import json as _json
+        return _json.loads((ROOT / "data" / "github.json").read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+
+
+def gh_slug() -> str:
+    return _gh_cfg().get("repo") or GH_SLUG
+
+
+def gh_token() -> str | None:
+    import os as _os
+    tok = _os.environ.get("GITHUB_TOKEN") or _os.environ.get("GH_TOKEN")
+    if tok:
+        return tok
+    try:
+        import json as _json
+        return _json.loads(GH_TOKEN_FILE.read_text(encoding="utf-8")).get("token")
+    except Exception:
+        return None
+
+
+
+def _gh_run(cmd, timeout=60, **_ignored):
+    """跑外部命令并用 UTF-8 解码输出（gh 输出是 UTF-8，Windows 默认 GBK 会炸）。
+
+    **_ignored：兼容调用处残留的 capture_output/text 参数——本函数始终捕获并解码。
+    """
+    return subprocess.run(cmd, capture_output=True, text=True,
+                          encoding="utf-8", errors="replace", timeout=timeout)
+
+
+def gh_cli_ok() -> bool:
+    import shutil as _sh
+    if not _sh.which("gh"):
+        return False
+    try:
+        proc = _gh_run(["gh", "auth", "status"], capture_output=True, text=True, timeout=15)
+        return proc.returncode == 0
+    except Exception:
+        return False
+
+
+def gh_api(method: str, path: str, body=None, raw: bool = False):
+    """走 REST API（用户 token）。返回 (status, data)。"""
+    import json as _json
+    import urllib.request as _ur
+    tok = gh_token()
+    if not tok:
+        raise RuntimeError("没有 GitHub 凭据（先 gh auth login，或用 gha auth --token）")
+    url = path if path.startswith("http") else f"https://api.github.com{path}"
+    data = _json.dumps(body).encode() if body is not None else None
+    req = _ur.Request(url, data=data, method=method, headers={
+        "Authorization": f"Bearer {tok}",
+        "Accept": "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28",
+        "User-Agent": "sniroute-gha",
+        "Content-Type": "application/json",
+    })
+    with _ur.urlopen(req, timeout=60) as resp:
+        payload = resp.read()
+        return resp.status, (payload if raw else _json.loads(payload or b"{}"))
+
+
+def _gha_dispatch(url: str, name: str) -> None:
+    slug = gh_slug()
+    if gh_cli_ok():
+        cmd = ["gh", "workflow", "run", "fetch.yml", "-R", slug, "-f", f"url={url}"]
+        if name:
+            cmd += ["-f", f"filename={name}"]
+        proc = _gh_run(cmd, capture_output=True, text=True, timeout=60)
+        if proc.returncode != 0:
+            raise RuntimeError((proc.stderr or proc.stdout).strip()[:200])
+        print(f"  已触发（gh CLI）：{slug} fetch.yml")
+        return
+    gh_api("POST", f"/repos/{slug}/actions/workflows/fetch.yml/dispatches",
+           {"ref": "main", "inputs": {"url": url, "filename": name or ""}})
+    print(f"  已触发（REST）：{slug} fetch.yml")
+
+
+def _gha_wait_run(since_iso: str, timeout_s: int = 600) -> dict:
+    import time as _t
+    slug = gh_slug()
+    deadline = _t.time() + timeout_s
+    while _t.time() < deadline:
+        if gh_cli_ok():
+            proc = _gh_run(
+                ["gh", "run", "list", "-R", slug, "--workflow=fetch.yml", "--limit", "5",
+                 "--json", "databaseId,status,conclusion,createdAt"],
+                capture_output=True, text=True, timeout=60)
+            if proc.returncode == 0:
+                runs = __import__("json").loads(proc.stdout or "[]")
+                for r in runs:
+                    if r.get("createdAt", "") >= since_iso and r.get("status") == "completed":
+                        return {"id": r["databaseId"], "conclusion": r.get("conclusion")}
+        else:
+            _, data = gh_api("GET", f"/repos/{slug}/actions/runs?per_page=10")
+            for r in data.get("workflow_runs", []):
+                if r.get("created_at", "") >= since_iso and r.get("status") == "completed":
+                    return {"id": r["id"], "conclusion": r.get("conclusion")}
+        _t.sleep(5)
+    raise RuntimeError("等待运行超时")
+
+
+def _gha_download(run_id: int, out_dir: Path) -> Path | None:
+    import json as _json
+    import shutil as _sh
+    import tempfile as _tf
+    import urllib.request as _ur
+    import zipfile as _zf
+    slug = gh_slug()
+    if gh_cli_ok():
+        proc = _gh_run(["gh", "run", "download", str(run_id), "-R", slug,
+                               "-n", "fetch", "-D", str(out_dir)],
+                              capture_output=True, text=True, timeout=300)
+        if proc.returncode != 0:
+            raise RuntimeError((proc.stderr or "").strip()[:200])
+        files = [f for f in out_dir.rglob("*") if f.is_file()]
+        return files[0] if files else None
+
+    _, data = gh_api("GET", f"/repos/{slug}/actions/runs/{run_id}/artifacts")
+    arts = [a for a in data.get("artifacts", []) if a.get("name") == "fetch"]
+    if not arts:
+        return None
+    tmp_zip = Path(_tf.gettempdir()) / f"gha-{run_id}.zip"
+    tok = gh_token()
+    req = _ur.Request(arts[0]["archive_download_url"], headers={
+        "Authorization": f"Bearer {tok}", "User-Agent": "sniroute-gha"})
+    with _ur.urlopen(req, timeout=300) as resp, open(tmp_zip, "wb") as fh:
+        _sh.copyfileobj(resp, fh)
+    with _zf.ZipFile(tmp_zip) as z:
+        names = [n for n in z.namelist() if not n.endswith("/")]
+        if not names:
+            return None
+        first = names[0]
+        target = out_dir / Path(first).name
+        out_dir.mkdir(parents=True, exist_ok=True)
+        with z.open(first) as src, open(target, "wb") as dst:
+            _sh.copyfileobj(src, dst)
+    tmp_zip.unlink(missing_ok=True)
+    return target
+
+
+def cmd_gha(args) -> None:
+    import datetime
+    import shutil as _sh
+    import tempfile as _tf
+    action = args.action
+
+    if action == "auth":
+        if not args.token:
+            die("用法：sniroute.cmd gha auth --token <PAT>（scope 至少 repo）")
+        import json as _json
+        GH_TOKEN_FILE.write_text(_json.dumps({"token": args.token.strip()}, indent=2), encoding="utf-8")
+        print(f"已保存凭据：{GH_TOKEN_FILE}")
+        print("注意：这是明文保存的 PAT，别把该文件同步到别处。")
+        return
+
+    if action == "status":
+        print(f"仓库     : {gh_slug()}")
+        if gh_cli_ok():
+            print("认证来源 : gh CLI（已登录）")
+        elif gh_token():
+            print("认证来源 : 本地 PAT（data/github-token.json）")
+        else:
+            print("认证来源 : 无（先 gh auth login，或 gha auth --token）")
+            return
+        try:
+            if gh_cli_ok():
+                proc = _gh_run(["gh", "run", "list", "-R", gh_slug(),
+                                       "--workflow=fetch.yml", "--limit", "5",
+                                       "--json", "databaseId,status,conclusion,createdAt"],
+                                      capture_output=True, text=True, timeout=60)
+                runs = __import__("json").loads(proc.stdout or "[]")
+            else:
+                _, data = gh_api("GET", f"/repos/{gh_slug()}/actions/runs?per_page=5")
+                runs = [{"databaseId": r["id"], "status": r["status"],
+                         "conclusion": r["conclusion"], "createdAt": r["created_at"]}
+                        for r in data.get("workflow_runs", [])]
+            print("\n最近运行：")
+            for r in runs:
+                print(f"  {r['databaseId']}  {r['status']:<10} {str(r.get('conclusion')):<10} {r.get('createdAt','')}")
+        except Exception as exc:
+            print(f"  读取运行列表失败：{exc}")
+        return
+
+    if action == "fetch":
+        if not args.url:
+            die("用法：sniroute.cmd gha fetch <url> [-o 输出文件] [--name 文件名]")
+        if not (gh_cli_ok() or gh_token()):
+            die("没有 GitHub 凭据：先 gh auth login，或 sniroute.cmd gha auth --token <PAT>")
+        name = args.name or ""
+        since = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        _gha_dispatch(args.url, name)
+        print("  等待运行完成…")
+        run = _gha_wait_run(since)
+        if run.get("conclusion") != "success":
+            die(f"运行失败（conclusion={run.get('conclusion')}，run id {run['id']}）")
+        tmp = Path(_tf.gettempdir()) / f"gha-out-{run['id']}"
+        _sh.rmtree(tmp, ignore_errors=True)
+        tmp.mkdir(parents=True, exist_ok=True)
+        got = _gha_download(run["id"], tmp)
+        if not got:
+            die("没有拿到 artifact")
+        out = Path(args.output) if args.output else (Path.cwd() / got.name)
+        _sh.copyfileobj(open(got, "rb"), open(out, "wb")) if False else _sh.copy2(got, out)
+        print(f"已保存 {out}  （{out.stat().st_size} 字节）")
+        print(f"  run id {run['id']}，源 {args.url}")
+        return
+
+    if action == "runs":
+        if not (gh_cli_ok() or gh_token()):
+            die("没有 GitHub 凭据")
+        if gh_cli_ok():
+            proc = _gh_run(["gh", "run", "list", "-R", gh_slug(), "--limit", "10"],
+                                  capture_output=True, text=True, timeout=60)
+            print(proc.stdout)
+        else:
+            _, data = gh_api("GET", f"/repos/{gh_slug()}/actions/runs?per_page=10")
+            for r in data.get("workflow_runs", []):
+                print(f"  {r['id']}  {r['status']:<10} {r.get('conclusion')}  {r['created_at']}")
+        return
+
+    die(f"未知动作 {action!r}")
+
+
 def cmd_update(args) -> None:
     local = local_version()
     remote, err = _remote_version_via_gh()
@@ -2091,6 +2334,14 @@ def main() -> None:
     p.add_argument("-o", "--output", default="", help="export 时输出路径")
     p.add_argument("--renew", action="store_true", help="export 时重新注册 WARP 账号")
     p.set_defaults(func=cmd_warp)
+
+    p = sub.add_parser("gha", help="用 GitHub Actions 的 runner 下载文件（墙外取文件通道）")
+    p.add_argument("action", choices=["status", "fetch", "auth", "runs"])
+    p.add_argument("url", nargs="?", default="", help="fetch 时必填")
+    p.add_argument("-o", "--output", default="", help="保存到哪个文件")
+    p.add_argument("--name", default="", help="目标文件名（留空由 URL 决定）")
+    p.add_argument("--token", default="", help="auth 时保存的 PAT")
+    p.set_defaults(func=cmd_gha)
 
     p = sub.add_parser("update", help="检查是否有新版本")
     p.add_argument("action", choices=["check"], nargs="?", default="check")
