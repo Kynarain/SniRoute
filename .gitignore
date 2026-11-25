@@ -66,3 +66,6 @@ data/github.json
 
 # ÔÆÍ¨µÀÆ¾¾Ý
 data/cloud.json
+
+# site QUIC probe cache (generated at runtime)
+data/quic-status.json

@@ -1882,6 +1882,50 @@ Chrome 实测（`--log-net-log`）：
 | `tools/quic-sni-test.py` | 用 aioquic 测任意域名的 QUIC 可达性 |
 | `tools/quic-test-server.py` | 本地 QUIC 服务端，验证客户端/包构造 |
 
+
+## 研究结论与设计约束
+
+三篇相关研究（HRPC 伦理/规模、Xue'24 封装 TLS 指纹、Zohaib'25 QUIC 封锁）
+的结论与对 Sniroute 的约束，整理在 [docs/research-notes.md](docs/research-notes.md)。
+
+三条直接落到代码里的原则：
+
+| 原则 | 依据 | 落地 |
+|---|---|---|
+| 只做单机低量探测，结论标注"仅代表本链路" | Ensafi | 不在工具里做扫描 |
+| 新功能不做"隧道套 TLS" | Xue 2024 | loopback/Worker 反代都是单层 TLS |
+| QUIC 按域名判定，不预设能用 | Zohaib 2025 | `site` 先查 h3 声明，再决定是否探 UDP |
+
+### `site` 现在会同时判定四条通道
+
+```powershell
+sniroute.cmd site www.pixiv.net
+```
+
+输出示例（实测）：
+
+```
+解析（经 doh.pub）：104.18.42.239, 172.64.145.17
+TCP 443：2/2 个地址可连
+TLS 带 SNI：被重置或失败
+TLS 不带 SNI：被重置或失败
+HTTPS 记录里的 ech：有
+HTTPS 记录里的 h3 ：有
+QUIC(h3)   ：成功 0.22s
+结论：
+  支持，QUIC 直连可用：h3 握手成功，不需要 ECH、也不需要本机终结。
+```
+
+结论优先级：TCP 不可达 → 带 SNI 成功 → **QUIC 成功** → ECH → 无 SNI 握手 → 不支持。
+
+- `--no-quic`：跳过 QUIC 探测（没装 aioquic 时用）
+- `--refresh-quic`：忽略 24 小时缓存重新探测
+- 没装 `aioquic` 时自动跳过，不报错（它不是运行依赖，只有这项探测用到）
+
+**注意**：QUIC 超时只能说明"没拿到 ServerHello"，**无法区分本地 UDP 阻断与 GFW 黑名单**，
+输出里会注明这一点，不要把它当成"被墙"的铁证。
+
+
 ## 关于哈希文件（3.10.5 起）
 
 不再随产物生成 `.sha256` / `.sha1` / `.md5` 与 `SHA256SUMS.txt` / `SHA1SUMS.txt` / `MD5SUMS.txt`。

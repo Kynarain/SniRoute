@@ -1,4 +1,4 @@
-﻿#requires -Version 5.1
+#requires -Version 5.1
 <#
 .SYNOPSIS
     Build the MSI with WiX directly (no Java, no jpackage).
@@ -71,7 +71,8 @@ if (Test-Path $signCer) { Copy-Item $signCer (Join-Path $Payload 'codesign.cer')
 foreach ($junk in @('logs', 'temp', 'chromeprofile', '__pycache__')) {
     # 敏感运行期文件绝不能进安装包：WARP 账号含私钥，DoH 缓存含浏览记录。
 # 这些都是本机生成的，用户自己跑一次 export 就有了。
-foreach ($leak in @('data\warp-account.json', 'data\doh-cache.json', 'data\doh-cache.tmp')) {
+foreach ($leak in @('data\warp-account.json', 'data\doh-cache.json', 'data\doh-cache.tmp',
+                            'data\quic-status.json')) {
     $lp = Join-Path $Payload $leak
     if (Test-Path $lp) {
         Remove-Item $lp -Force -ErrorAction SilentlyContinue

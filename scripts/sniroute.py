@@ -2250,33 +2250,175 @@ def tls_handshake(ip: str, port: int, server_name, timeout: float) -> bool:
             pass
 
 
-def find_ech_config(name: str, timeout: float) -> bool:
-    """查 HTTPS/SVCB（type 65）里有没有 ech=。
+# 查 HTTPS/SVCB 记录必须用 wire 格式：公共 DoH 的 JSON 接口对 type=HTTPS
+# 一律返回 400（实测 doh.pub / 223.5.5.5 / doh.360.cn 都是），所以这里单独
+# 用 RFC 8484 的 application/dns-message 通道。
+DOH_WIRE_ENDPOINTS = [
+    "https://223.5.5.5/dns-query",
+    "https://doh.pub/dns-query",
+    "https://1.12.12.12/dns-query",
+    # 国内递归对 HTTPS 记录的答案经常是"降级"版本（实测 pixiv 只给 alpn=h2，
+    # 没有 ech），最后再问一次我们自己的 Worker——它拿的是权威记录。
+    # 换自己的 Worker 时改 data/doh-endpoints.json 即可，见 README。
+    "https://doh.kynarain.cn/dns-query",
+]
 
-    只有带 ech 的域名，浏览器原生 ECH 这条路才存在。
-    """
-    for _label, base in DOH_ENDPOINTS:
-        url = f"{base}?name={urllib.parse.quote(name)}&type=HTTPS"
-        req = urllib.request.Request(url, headers={"Accept": "application/dns-json"})
+
+def doh_wire(name: str, qtype: int, timeout: float) -> bytes | None:
+    """发一次 wire 格式的 DoH 查询，返回原始响应字节。"""
+    import secrets
+    import struct
+    qid = secrets.randbelow(0xFFFF)
+    query = struct.pack(">HHHHHH", qid, 0x0100, 1, 0, 0, 0)
+    query += b"".join(bytes([len(part)]) + part.encode() for part in name.strip(".").split("."))
+    query += b"\x00" + struct.pack(">HH", qtype, 1)
+    for base in DOH_WIRE_ENDPOINTS:
+        req = urllib.request.Request(
+            base, data=query, method="POST",
+            headers={"content-type": "application/dns-message",
+                     "accept": "application/dns-message"})
         try:
             with urllib.request.urlopen(req, timeout=timeout) as resp:
-                doc = json.loads(resp.read().decode("utf-8", errors="replace"))
+                return resp.read()
         except Exception:
             continue
-        for answer in doc.get("Answer", []):
-            if answer.get("type") == 65 and "ech=" in str(answer.get("data", "")):
-                return True
-    return False
+    return None
+
+
+def _skip_name(buf: bytes, pos: int) -> int:
+    while pos < len(buf) and buf[pos] != 0:
+        if buf[pos] & 0xC0 == 0xC0:      # 压缩指针直接收尾
+            return pos + 2
+        pos += 1 + buf[pos]
+    return pos + 1
+
+
+def parse_https_answer(buf: bytes) -> dict:
+    """从 HTTPS/SVCB 响应里提取 ech 与 h3 两项能力。"""
+    caps = {"ech": False, "h3": False, "found": False}
+    if not buf or len(buf) < 12:
+        return caps
+    an = int.from_bytes(buf[6:8], "big")
+    pos = _skip_name(buf, 12) + 4          # 跳过 question
+    for _ in range(an):
+        if pos + 10 > len(buf):
+            break
+        pos = _skip_name(buf, pos)          # owner name
+        rtype = int.from_bytes(buf[pos:pos + 2], "big")
+        rdlen = int.from_bytes(buf[pos + 8:pos + 10], "big")
+        rdata = buf[pos + 10:pos + 10 + rdlen]
+        pos += 10 + rdlen
+        if rtype != 65 or not rdata:
+            continue
+        caps["found"] = True
+        params = _skip_name(rdata, 2)       # 跳过 priority + target
+        while params + 4 <= len(rdata):
+            key = int.from_bytes(rdata[params:params + 2], "big")
+            plen = int.from_bytes(rdata[params + 2:params + 4], "big")
+            value = rdata[params + 4:params + 4 + plen]
+            params += 4 + plen
+            if key == 1:                    # alpn: 若干 length-prefixed 协议名
+                j = 0
+                while j < len(value):
+                    n = value[j]
+                    if value[j + 1:j + 1 + n] == b"h3":
+                        caps["h3"] = True
+                    j += 1 + n
+            elif key == 5:                  # ech
+                caps["ech"] = True
+    return caps
+
+
+def find_https_caps(name: str, timeout: float) -> dict:
+    """查 HTTPS/SVCB（type 65）里声明了哪些能力。
+
+    为什么要多解析器合并：不同递归的答案不一样——实测 223.5.5.5 对 pixiv
+    只给 alpn=h2（92 字节），doh.pub 给的是带 h3 的完整记录（468 字节）。
+    只信一个会漏判，所以把几个解析器的结论取并集。
+
+      ech  有 → 浏览器原生 ECH 这条路存在
+      h3   有 → 服务器支持 QUIC，值得探测（没有就没必要花时间打 UDP）
+    """
+    merged = {"ech": False, "h3": False, "found": False}
+    import secrets
+    import struct
+    qid = secrets.randbelow(0xFFFF)
+    query = struct.pack(">HHHHHH", qid, 0x0100, 1, 0, 0, 0)
+    query += b"".join(bytes([len(part)]) + part.encode() for part in name.strip(".").split("."))
+    query += b"\x00" + struct.pack(">HH", 65, 1)
+    for base in DOH_WIRE_ENDPOINTS:
+        req = urllib.request.Request(
+            base, data=query, method="POST",
+            headers={"content-type": "application/dns-message",
+                     "accept": "application/dns-message"})
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                caps = parse_https_answer(resp.read())
+        except Exception:
+            continue
+        merged["found"] = merged["found"] or caps["found"]
+        merged["ech"] = merged["ech"] or caps["ech"]
+        merged["h3"] = merged["h3"] or caps["h3"]
+        if merged["ech"] and merged["h3"]:
+            break
+    return merged
+
+
+def find_ech_config(name: str, timeout: float) -> bool:
+    """兼容旧调用点：只关心有没有 ech。"""
+    return find_https_caps(name, timeout)["ech"]
+
+
+# ---------------------------------------------------------------- QUIC 状态缓存
+#
+# 一次 QUIC 探测要 4~8 秒（等超时），不适合每次 site 都跑。
+# 结果按域名缓存 24 小时；网络状态会变，所以过期就重测。
+QUIC_CACHE = ROOT / "data" / "quic-status.json"
+QUIC_CACHE_TTL = 24 * 3600
+
+
+def load_quic_cache() -> dict:
+    try:
+        doc = json.loads(QUIC_CACHE.read_text(encoding="utf-8"))
+        return doc if isinstance(doc, dict) else {}
+    except Exception:
+        return {}
+
+
+def save_quic_cache(cache: dict) -> None:
+    cache["_comment"] = "site 的 QUIC 探测缓存；24 小时过期，可由 site 重新生成。"
+    QUIC_CACHE.parent.mkdir(parents=True, exist_ok=True)
+    QUIC_CACHE.write_text(json.dumps(cache, ensure_ascii=False, indent=2) + "\n",
+                          encoding="utf-8")
+
+
+def cached_quic(domain: str, refresh: bool) -> dict | None:
+    if refresh:
+        return None
+    entry = load_quic_cache().get(domain)
+    if not isinstance(entry, dict):
+        return None
+    if time.time() - float(entry.get("ts", 0)) > QUIC_CACHE_TTL:
+        return None
+    return entry
+
+
+def store_quic(domain: str, result: dict) -> None:
+    cache = load_quic_cache()
+    cache[domain] = {"reason": result.get("reason"), "elapsed": result.get("elapsed"),
+                     "ok": result.get("ok"), "ts": int(time.time())}
+    save_quic_cache(cache)
 
 
 def cmd_check_site(args) -> None:
     """判断一个域名能不能被本工具支持，并说明该用哪种模式。
 
-    判定只看三条事实，顺序也不能换：
-      1. TCP 443 能不能连上        —— 连不上就是 IP 级封锁，无解
-      2. 带 SNI 握手是否成功        —— 成功说明本来就不需要本工具
-      3. 不带 SNI 握手是否成功      —— 这决定 loopback 模式可不可行
-    再补一条 type=65 里有没有 ech，决定能不能走浏览器原生 ECH。
+    判定顺序（不能换，越靠前越"省事"）：
+      1. TCP 443 能否连上      —— 连不上就是 IP 级封锁，无解
+      2. 带 SNI 握手能否成功    —— 成功说明本来就不需要本工具
+      3. QUIC（h3）握手能否成功 —— 成功说明可以直连，连 ECH 都不用
+      4. HTTPS 记录里有没有 ech —— 这是浏览器原生 ECH 的前提
+      5. 不带 SNI 能否握手      —— 决定 loopback 模式可不可行
     """
     domain = args.domain
     timeout = args.timeout
@@ -2302,16 +2444,50 @@ def cmd_check_site(args) -> None:
     ip = reachable[0]
     sni_ok = tls_handshake(ip, 443, domain, timeout)
     nosni_ok = tls_handshake(ip, 443, None, timeout)
-    ech = find_ech_config(domain, timeout)
+    caps = find_https_caps(domain, timeout)
 
     print(f"  TLS 带 SNI：{'握手成功' if sni_ok else '被重置或失败'}")
     print(f"  TLS 不带 SNI：{'握手成功' if nosni_ok else '被重置或失败'}")
-    print(f"  HTTPS 记录里的 ech：{'有' if ech else '无'}")
+    print(f"  HTTPS 记录里的 ech：{'有' if caps['ech'] else '无'}")
+    print(f"  HTTPS 记录里的 h3 ：{'有' if caps['h3'] else '无'}")
+
+    # QUIC 探测：只有声明了 h3 才值得打 UDP，否则必然是超时（白等 8 秒）
+    quic = None
+    if getattr(args, "quic", True):
+        if not caps["h3"]:
+            print("  QUIC(h3)   ：跳过（HTTPS 记录没声明 h3）")
+        else:
+            quic = cached_quic(domain, getattr(args, "refresh_quic", False))
+            if quic:
+                print(f"  QUIC(h3)   ：{describe_quic(quic)}（缓存）")
+            else:
+                try:
+                    sys.path.insert(0, str(ROOT / "tools"))
+                    import quic_probe
+                    result = quic_probe.quic_handshake_best(
+                        domain, reachable, timeout=min(timeout, 5.0), limit=2)
+                    quic = {"reason": result["reason"], "elapsed": result["elapsed"],
+                            "ok": result["ok"]}
+                    store_quic(domain, quic)
+                    print(f"  QUIC(h3)   ：{quic_probe.describe(result)}")
+                    if result["reason"] == "timeout":
+                        print("              （超时无法区分本地 UDP 阻断与 GFW 黑名单）")
+                except ImportError:
+                    print("  QUIC(h3)   ：跳过（未安装 aioquic：pip install aioquic）")
+                except Exception as exc:
+                    print(f"  QUIC(h3)   ：探测失败（{type(exc).__name__}）")
+    else:
+        print("  QUIC(h3)   ：已跳过（--no-quic）")
 
     print("\n结论：")
-    if ech:
+    if quic and quic.get("ok"):
+        print("  支持，QUIC 直连可用：h3 握手成功，不需要 ECH、也不需要本机终结。")
+        print(f"  浏览器会按 HTTPS 记录里的 h3 自动走 QUIC；确保 DNS 给的是真实地址。")
+    elif caps["ech"]:
         print("  支持，建议 ech 模式：浏览器原生 ECH，本机不做 TLS 终结。")
         print(f"  需要 DNS 层把 {domain} 的 HTTPS 记录补上 ech（data/cloudflare-ech.json）。")
+        if quic and quic.get("reason") == "timeout":
+            print("  QUIC 当前不通，走 ECH over TCP 即可（两条路互不影响）。")
     elif nosni_ok:
         print("  支持，用 loopback 模式：DNS 指向本机，nginx 终结后无 SNI 转发。")
         print(f"  需要为该域名签发叶子证书（sites.json 的 cert_san 要包含它）。")
@@ -2319,6 +2495,20 @@ def cmd_check_site(args) -> None:
         print("  不需要本工具：带 SNI 就能握手，阻断不在这一层。")
     else:
         print("  不支持：带/不带 SNI 都被拒，且没有可用的 ECH 配置。")
+        print("  唯一出路是换出口（WARP / VPS / Tor）。")
+
+
+def describe_quic(entry: dict) -> str:
+    reason = entry.get("reason")
+    elapsed = float(entry.get("elapsed") or 0)
+    if entry.get("ok"):
+        return f"成功 {elapsed:.2f}s"
+    if reason == "timeout":
+        return f"超时（{elapsed:.1f}s 无 ServerHello，疑似 QUIC 黑名单）"
+    if reason == "unsupported":
+        return "服务器不支持 h3"
+    return f"失败（{reason}）"
+
 
 def cmd_check(args) -> None:
     print(f"仓库根目录 : {ROOT}")
@@ -2806,7 +2996,11 @@ def main() -> None:
     p = sub.add_parser("site", help="判断一个域名能不能被本工具支持，并给出该用的模式")
     p.add_argument("domain")
     p.add_argument("--timeout", type=float, default=6.0)
-    p.set_defaults(func=cmd_check_site)
+    p.add_argument("--no-quic", dest="quic", action="store_false",
+                   help="跳过 QUIC 探测（没装 aioquic 时用）")
+    p.add_argument("--refresh-quic", action="store_true",
+                   help="忽略 24 小时缓存，重新探测 QUIC")
+    p.set_defaults(func=cmd_check_site, quic=True, refresh_quic=False)
     p = sub.add_parser("check", help="环境自检")
     p.add_argument("--nginx")
     p.set_defaults(func=cmd_check)
