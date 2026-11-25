@@ -1827,32 +1827,60 @@ sniroute.cmd cloud fetch <目标URL> --provider cf -o out.bin
 
 
 
-## QUIC（UDP 443）当前实测：不稳定，不能当主力
+## QUIC 实测修正：部分可用，取决于域名是否在 QUIC 黑名单
 
-理论上 QUIC 最理想：SNI 在加密的 ClientHello 里，审查者看不到。但实测要看网络状态。
+**先说结论：QUIC 不是"全封"，也不是"全通"——GFW 有一份独立的 QUIC 域名黑名单。**
+（依据：Zohaib et al., *Exposing and Circumventing SNI-based QUIC Censorship of the
+Great Firewall of China*。）
 
-**同一时段的对照（2026-11-25 晚，中国移动家宽）：**
+### 用真实 QUIC 栈测出的矩阵
 
-| 测试 | 结果 |
+`tools/quic-sni-test.py`（aioquic 完整客户端，直接连真实边缘）：
+
+| 域名 | TCP 带 SNI | QUIC 握手 | 说明 |
+|---|---|---|---|
+| www.pixiv.net | ❌ RST | ✅ **0.61s 成功** | 不在 QUIC 黑名单 |
+| www.google.com | ❌ RST | ✅ 0.48s | 不在黑名单 |
+| www.cloudflare.com | ✅ | ✅ 0.97s | 对照 |
+| www.reddit.com | — | ✅ 0.11s | 不在黑名单 |
+| www.youtube.com | ❌ | ❌ **超时** | **在 QUIC 黑名单** |
+| www.vrchat.com | ❌ | ❌ 无 h3 | 服务器不支持 |
+| api.vrchat.cloud | ✅ | ❌ 无 h3 | 服务器不支持 |
+
+Chrome 实测（`--log-net-log`）：
+
+```
+打开 https://www.pixiv.net/  -> QUIC_SESSION 出现 374 次，页面 DOM 73843 字节
+```
+
+**Chrome 真的在用 QUIC**，pixiv 页面能打开靠的就是这条路径。
+
+### 为什么之前误判成"QUIC 不可靠"
+
+用 `--origin-to-force-quic-on` 强制 Chrome 走 QUIC 时，所有站点都报
+`ERR_QUIC_PROTOCOL_ERROR`——那是**强制标志与 ECH/NRPT 的交互问题**，不是网络封锁。
+用 aioquic 完整栈重测才得到上面这张真实矩阵。
+
+### 这对绕过意味着什么
+
+| 情况 | 可用手段 |
 |---|---|
-| 强制 QUIC 到 www.cloudflare.com（确定支持 h3）| `ERR_QUIC_PROTOCOL_ERROR` |
-| 强制 QUIC 到 www.google.com / www.pixiv.net | 同上 |
-| UDP 53 到 9.9.9.9 | ✅ 有回包 |
-| UDP 3478（STUN）到 stun.cloudflare.com | ✅ 有回包 |
-| UDP 53 到 8.8.8.8 / 1.1.1.1 | ❌ 超时 |
+| 域名不在 QUIC 黑名单 + 支持 h3 | **QUIC 直接可用**（pixiv/google/reddit） |
+| 域名在 QUIC 黑名单（如 YouTube） | 需要 Initial 分片（sni-slicing） |
+| 域名不支持 h3（VRChat） | 无 QUIC 路径 |
 
-结论：**不是 UDP 全封，而是 UDP 443 被单独限制**（运营商对 QUIC 的常见处理）。
-所以 QUIC 只能"能通时当加速"，不能当作可靠路径。
+论文给出的绕过方法（对黑名单域名有效）：
 
-**好消息：ECH 不依赖 QUIC。** 同一时段实测：
+- GFW **不重组跨 UDP 数据报的 QUIC Initial**，所以把 ClientHello 拆成多个数据报即可
+- Firefox 137+（2025-04-30）默认开启 `network.http.http3.sni-slicing`
+- quic-go v0.52.0（2025-05-23）起，sing-box / V2Ray / Xray / Hysteria / TUIC 均默认支持
 
-```
-Chrome 打开 https://www.pixiv.net/  -> DOM 74266 字节，无错误
-```
+### 配套工具
 
-说明走 TCP + ECH 依然有效。这也是为什么 pixiv 条目用 `ech` 模式并配
-`ech_fallback: dns`——QUIC 不通时自动退回 TCP，不影响可用性。
-
+| 文件 | 用途 |
+|---|---|
+| `tools/quic-sni-test.py` | 用 aioquic 测任意域名的 QUIC 可达性 |
+| `tools/quic-test-server.py` | 本地 QUIC 服务端，验证客户端/包构造 |
 
 ## 关于哈希文件（3.10.5 起）
 
