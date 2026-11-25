@@ -17,5 +17,6 @@ pixiv|https://www.pixiv.net/
 roblox|https://www.roblox.com/
 steam|https://store.steampowered.com/
 twitch|https://www.twitch.tv/
+vrchat|https://www.vrchat.com/
 x|https://x.com/
 youtube|https://www.youtube.com/

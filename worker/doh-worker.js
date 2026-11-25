@@ -11,7 +11,7 @@
  */
 
 const MANAGED = new Set([
-  'pixiv.net', 'www.pixiv.net',
+    'pixiv.net', 'www.pixiv.net',
   'discord.com', 'www.discord.com', 'gateway.discord.gg', 'discord.gg',
   'cdn.discordapp.com', 'media.discordapp.net',
   'x.com', 'www.x.com', 'api.x.com', 't.co',

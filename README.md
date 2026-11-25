@@ -1700,6 +1700,36 @@ sniroute.cmd gha fetch <url> -o "$env:USERPROFILE\Downloads"
 **为什么不做成"检测到缺失就自动 fork"**：那等于替用户在自己账号下创建仓库，
 一次误触发就多一个公开仓库。宁可多问一次。
 
+
+## VRChat 支持情况（3.15.0 实测）
+
+VRChat 的流量分三层，结论完全不同：
+
+| 部分 | 域名 | 实测 | 本工具能否帮上 |
+|---|---|---|---|
+| **游戏 API** | `api.vrchat.cloud` | 真实 IP `104.18.26.36`，SNI 正常，**解析未被投毒** | 不需要（本来就通） |
+| **资源下载** | `files.vrchat.cloud` | CloudFront，SNI 正常，证书对得上 | 不需要（本来就通） |
+| **官网** | `vrchat.com` / `www.vrchat.com` | **三重问题**，见下 | 只能修解析，TLS 层无解 |
+| **游戏实时流量** | Photon（UDP） | 本工具不处理 UDP | 需要隧道 |
+
+官网的具体实测：
+
+```
+解析（alidns）  : 108.160.167.159      ← 错误/投毒（108.160.x 是 Dropbox 段）
+解析（干净 DoH）: 104.18.6.156/104.18.7.156   ← 真实 Cloudflare 地址
+TLS 带 SNI      : 3 个 IP × 3 次，全部 RST
+TLS 不带 SNI    : 失败（Cloudflare 要求 SNI）
+HTTPS 记录的 ALPN: 只有 h2 —— 没有 h3（QUIC 用不了）
+HTTPS 记录的 ECH : 没有
+```
+
+所以 `www.vrchat.com` **在 TLS 层没有任何技巧可用**：没有 ECH、没有 QUIC、SNI 又必封。
+唯一办法是换出口（WARP / VPS / Tor）。
+
+**站点条目**：`vrchat`（官网，dns 模式，仅修解析）与 `vrchat-api`（客户端域名，dns 模式）。
+不建议给官网配 `ech` 模式——那会给一个没有 ECH 的服务端注入配置，反而让握手更容易失败。
+
+
 ## 关于哈希文件（3.10.5 起）
 
 不再随产物生成 `.sha256` / `.sha1` / `.md5` 与 `SHA256SUMS.txt` / `SHA1SUMS.txt` / `MD5SUMS.txt`。
