@@ -1343,8 +1343,96 @@ def gh_api(method: str, path: str, body=None, raw: bool = False):
         return resp.status, (payload if raw else _json.loads(payload or b"{}"))
 
 
+
+def _gh_repo_exists(slug: str) -> bool | None:
+    """仓库是否存在。None = 无法判断（网络问题）。"""
+    try:
+        if gh_cli_ok():
+            proc = _gh_run(["gh", "api", f"repos/{slug}", "--jq", ".full_name"], timeout=25)
+            if proc.returncode == 0:
+                return True
+            blob = (proc.stderr or "") + (proc.stdout or "")
+            if "404" in blob or "Not Found" in blob:
+                return False
+            return None
+        try:
+            gh_api("GET", f"/repos/{slug}")
+            return True
+        except Exception as exc:
+            if "404" in str(exc):
+                return False
+            return None
+    except Exception:
+        return None
+
+
+def _gh_ensure_repo(slug: str) -> None:
+    """确认目标仓库存在；不存在就停下来说明怎么做（**不自动 fork**）。
+
+    为什么不自作主张：fork 会在用户账号下创建仓库，属于对外可见的操作，
+    必须由用户明确同意。这里只给指引，真正的 fork 由 `gha fork` 完成，
+    而 `gha fork` 自己会先问一次。
+    """
+    exists = _gh_repo_exists(slug)
+    if exists:
+        return
+    if exists is None:
+        print(f"  无法确认 {slug} 是否存在（网络问题），继续尝试")
+        return
+
+    login = _gh_login() or ""
+    if login and slug == f"{login}/SniRoute":
+        die(f"你的账号下还没有 {slug}。\n"
+            f"      运行下面的命令来 fork（会先征求你的确认）：\n"
+            f"        sniroute.cmd gha fork")
+    die(f"仓库 {slug} 不存在。\n"
+        f"      用 gha config 指定一个已有仓库，或先 fork：gh repo fork {GH_SLUG} --clone=false")
+
+
+def cmd_gha_fork(args) -> None:
+    """显式 fork 作者仓库到当前账号（需要确认）。"""
+    import time as _t
+
+    login = _gh_login()
+    if not login:
+        die("没有 gh 登录，无法确定 fork 到哪个账号（先 gh auth login）")
+    target = f"{login}/SniRoute"
+    if _gh_repo_exists(target):
+        print(f"{target} 已存在，无需 fork。")
+        return
+
+    if not args.yes:
+        print(f"即将把 {GH_SLUG} fork 到你的账号：{target}")
+        print("（这会在你的 GitHub 账号下创建一个公开仓库）")
+        try:
+            answer = input("继续？[y/N] ").strip().lower()
+        except EOFError:
+            answer = ""
+        if answer not in ("y", "yes"):
+            print("已取消，未做任何改动。")
+            return
+
+    if gh_cli_ok():
+        proc = _gh_run(["gh", "repo", "fork", GH_SLUG, "--clone=false"], timeout=120)
+        if proc.returncode != 0:
+            die(f"fork 失败：{((proc.stderr or proc.stdout).strip())[:200]}")
+    else:
+        try:
+            gh_api("POST", f"/repos/{GH_SLUG}/forks", {})
+        except Exception as exc:
+            die(f"fork 失败：{exc}")
+
+    for _ in range(20):
+        _t.sleep(3)
+        if _gh_repo_exists(target):
+            print(f"fork 完成：{target}")
+            return
+    print(f"fork 已发起，但 {target} 还没出现。稍等片刻后运行 gha status 确认。")
+
+
 def _gha_dispatch(url: str, name: str) -> None:
     slug = gh_slug()
+    _gh_ensure_repo(slug)
     if gh_cli_ok():
         cmd = ["gh", "workflow", "run", "fetch.yml", "-R", slug, "-f", f"url={url}"]
         if name:
@@ -1513,6 +1601,10 @@ def cmd_gha(args) -> None:
     import shutil as _sh
     import tempfile as _tf
     action = args.action
+
+    if action == "fork":
+        cmd_gha_fork(args)
+        return
 
     if action == "config":
         # 别人用这份工具时，必须把仓库改成他们自己的 fork，否则会往作者仓库发
@@ -2500,13 +2592,14 @@ def main() -> None:
     p.set_defaults(func=cmd_warp)
 
     p = sub.add_parser("gha", help="用 GitHub Actions 的 runner 下载文件（墙外取文件通道）")
-    p.add_argument("action", choices=["status", "fetch", "auth", "runs", "login", "config"])
+    p.add_argument("action", choices=["status", "fetch", "auth", "runs", "login", "config", "fork"])
     p.add_argument("url", nargs="?", default="", help="fetch 时必填")
     p.add_argument("-o", "--output", default="", help="保存到哪个文件")
     p.add_argument("--name", default="", help="目标文件名（留空由 URL 决定）")
     p.add_argument("--token", default="", help="auth 时保存的 PAT")
     p.add_argument("--client-id", default="", help="login 时的 OAuth App Client ID")
     p.add_argument("--repo", default="", help="config 时的 owner/name")
+    p.add_argument("--yes", action="store_true", help="fork 时跳过确认")
     p.set_defaults(func=cmd_gha)
 
     p = sub.add_parser("update", help="检查是否有新版本")
