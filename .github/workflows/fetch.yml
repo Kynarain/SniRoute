@@ -1,0 +1,56 @@
+name: fetch
+
+# 用 GitHub 的 runner（墙外）下载一个文件，然后作为 artifact 交回本机。
+# 本机取回：gh run download <run-id> -n fetch
+#
+# 定位说明：这是"取文件"的通道，不是代理/隧道。runner 是临时的、没有入向连接，
+# 也不适合跑常驻服务（GitHub 的 AUP 不允许把 Actions 当通用计算/代理用）。
+# 它擅长的事就是：在一个能上网的环境里跑一条命令，把结果带回来。
+
+on:
+  workflow_dispatch:
+    inputs:
+      url:
+        description: '要下载的 URL（https）'
+        required: true
+      filename:
+        description: '保存的文件名（留空则用 URL 最后一段）'
+        required: false
+        default: ''
+      timeout:
+        description: '超时秒数'
+        required: false
+        default: '600'
+
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Download
+        env:
+          URL: ${{ inputs.url }}
+          NAME: ${{ inputs.filename }}
+          TIMEOUT: ${{ inputs.timeout }}
+        run: |
+          set -euo pipefail
+          name="$NAME"
+          if [ -z "$name" ]; then
+            name="$(basename "${URL%%\?*}")"
+            [ -z "$name" ] && name="download.bin"
+          fi
+          echo "downloading: $URL"
+          curl -fL --retry 3 --retry-delay 5 --max-time "$TIMEOUT" \
+               -o "$name" "$URL"
+          ls -l "$name"
+          echo "sha256: $(sha256sum "$name" | cut -d' ' -f1)"
+          echo "size: $(stat -c %s "$name") bytes"
+          echo "NAME=$name" >> "$GITHUB_ENV"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: fetch
+          path: ${{ env.NAME }}
+          retention-days: 3
+          if-no-files-found: error
