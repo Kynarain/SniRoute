@@ -584,9 +584,9 @@ bool CaTrusted() {
            wide.find(L"sniroute") != std::wstring::npos;
 }
 
-// WARP 是否已连接。返回 0=未安装 1=已连接 2=未连接。
-// 用 warp-cli status 判定，而不是看网卡：MASQUE 协议下网卡在但流量可能不通，
-// 只有 status 说 Connected 才代表客户端认为隧道可用。
+// WARP 鏄惁宸茶繛鎺ャ€傝繑鍥?0=鏈畨瑁?1=宸茶繛鎺?2=鏈繛鎺ャ€?
+// 鐢?warp-cli status 鍒ゅ畾锛岃€屼笉鏄湅缃戝崱锛歁ASQUE 鍗忚涓嬬綉鍗″湪浣嗘祦閲忓彲鑳戒笉閫氾紝
+// 鍙湁 status 璇?Connected 鎵嶄唬琛ㄥ鎴风璁や负闅ч亾鍙敤銆?
 int WarpState() {
     static const wchar_t* kCandidates[] = {
         L"C:\\Program Files\\Cloudflare\\Cloudflare WARP\\warp-cli.exe",
@@ -629,7 +629,7 @@ int WarpState() {
     return 2;
 }
 
-// 通过 sniroute.cmd 执行 warp on/off，不等待（warp-cli 连接可能要几秒）。
+// 閫氳繃 sniroute.cmd 鎵ц warp on/off锛屼笉绛夊緟锛坵arp-cli 杩炴帴鍙兘瑕佸嚑绉掞級銆?
 void RunWarpAction(const wchar_t* action) {
     std::wstring cmdline = L"cmd.exe /c \"\"" + g_cliPath + L"\" warp " + action + L"\"";
     Log(L"[warp] " + cmdline);
@@ -650,16 +650,16 @@ void RunWarpAction(const wchar_t* action) {
 }
 
 
-// 用 winget 安装 Cloudflare WARP。走官方源，不自己分发安装包。
-// 会弹一次 UAC（WARP 要装服务和驱动），安装完刷新菜单状态。
+// 鐢?winget 瀹夎 Cloudflare WARP銆傝蛋瀹樻柟婧愶紝涓嶈嚜宸卞垎鍙戝畨瑁呭寘銆?
+// 浼氬脊涓€娆?UAC锛圵ARP 瑕佽鏈嶅姟鍜岄┍鍔級锛屽畨瑁呭畬鍒锋柊鑿滃崟鐘舵€併€?
 void RunWarpInstall() {
     Balloon(g_str.get(L"tip", L"sniroute"),
             g_str.get(L"warp_installing", L"Installing Cloudflare WARP (winget or official package)..."),
             NIIF_INFO);
     Log(L"[warp] winget install start");
     CreateThread(nullptr, 0, [](LPVOID) -> DWORD {
-        // 交给 CLI：它会先试 winget，没有 winget 就下载 Cloudflare 官方安装包。
-        // 不是每台 Windows 都有 winget（LTSC、精简版常见）。
+        // 浜ょ粰 CLI锛氬畠浼氬厛璇?winget锛屾病鏈?winget 灏变笅杞?Cloudflare 瀹樻柟瀹夎鍖呫€?
+        // 涓嶆槸姣忓彴 Windows 閮芥湁 winget锛圠TSC銆佺簿绠€鐗堝父瑙侊級銆?
         std::wstring cmd = L"cmd.exe /c \"\"" + g_cliPath + L"\" warp install\"";
         STARTUPINFOW si{};
         si.cb = sizeof(si);
@@ -684,13 +684,13 @@ void RunWarpInstall() {
 }
 
 
-// WARP 断开后把本地 DNS 方案拉回来。
+// WARP 鏂紑鍚庢妸鏈湴 DNS 鏂规鎷夊洖鏉ャ€?
 //
-// 为什么需要它：WARP 是整机隧道，它掉线时用户往往以为"网断了"，而实际上本地
-// DoH/nginx 可能因为升级、崩溃、或从未启动而缺失。这里做两件事：
-//   1) 检查 5444(DoH 前置) / 5454(DoH 后端) / 443(nginx) 是否都在听
-//   2) 缺任意一个就跑一次 sniroute.cmd up 把它们拉起来
-// 全部就绪后弹提示，让用户知道"已经切回本地 DNS 方案"。
+// 涓轰粈涔堥渶瑕佸畠锛歐ARP 鏄暣鏈洪毀閬擄紝瀹冩帀绾挎椂鐢ㄦ埛寰€寰€浠ヤ负"缃戞柇浜?锛岃€屽疄闄呬笂鏈湴
+// DoH/nginx 鍙兘鍥犱负鍗囩骇銆佸穿婧冦€佹垨浠庢湭鍚姩鑰岀己澶便€傝繖閲屽仛涓や欢浜嬶細
+//   1) 妫€鏌?5444(DoH 鍓嶇疆) / 5454(DoH 鍚庣) / 443(nginx) 鏄惁閮藉湪鍚?
+//   2) 缂轰换鎰忎竴涓氨璺戜竴娆?sniroute.cmd up 鎶婂畠浠媺璧锋潵
+// 鍏ㄩ儴灏辩华鍚庡脊鎻愮ず锛岃鐢ㄦ埛鐭ラ亾"宸茬粡鍒囧洖鏈湴 DNS 鏂规"銆?
 void RestoreLocalDns() {
     CreateThread(nullptr, 0, [](LPVOID) -> DWORD {
         bool ok = PortListening(5444) && PortListening(5454) && PortListening(443);
@@ -717,8 +717,8 @@ void RestoreLocalDns() {
             CloseHandle(pi.hThread);
             Log(L"[dns] up exit " + std::to_wstring(upExit));
         }
-        // up 会先停/起服务再做健康检查，端口不是立刻全部就绪。轮询最多 30 秒；
-        // 仍不就绪就再跑一次 up（服务可能刚好被上一次重启打断）。
+        // up 浼氬厛鍋?璧锋湇鍔″啀鍋氬仴搴锋鏌ワ紝绔彛涓嶆槸绔嬪埢鍏ㄩ儴灏辩华銆傝疆璇㈡渶澶?30 绉掞紱
+        // 浠嶄笉灏辩华灏卞啀璺戜竴娆?up锛堟湇鍔″彲鑳藉垰濂借涓婁竴娆￠噸鍚墦鏂級銆?
         auto allUp = [](int *miss) -> bool {
             bool a = PortListening(5444), b = PortListening(5454), c = PortListening(443);
             if (miss) *miss = a ? (b ? (c ? 0 : 443) : 5454) : 5444;
@@ -731,8 +731,8 @@ void RestoreLocalDns() {
             }
             return allUp(nullptr);
         };
-        // up 的正常结束就代表服务已拉起；端口探测只用来兜底，不要在它重启
-        // 服务的窗口里误判成"没起来"。
+        // up 鐨勬甯哥粨鏉熷氨浠ｈ〃鏈嶅姟宸叉媺璧凤紱绔彛鎺㈡祴鍙敤鏉ュ厹搴曪紝涓嶈鍦ㄥ畠閲嶅惎
+        // 鏈嶅姟鐨勭獥鍙ｉ噷璇垽鎴?娌¤捣鏉?銆?
         bool now = (started && upExit == 0);
         if (!now) now = waitUp(20);
         if (!now) {
@@ -762,10 +762,10 @@ void RestoreLocalDns() {
 }
 
 
-// WARP 是否由用户主动启用。标记文件 data\.warp-enabled：
-//   存在   -> 用户希望 WARP 开着（重启后保持）
-//   不存在 -> 默认关闭（产品默认状态；启动时若发现 WARP 还连着就断开）
-// 用标记文件而不是读 JSON，是为了和 .autostart-off 保持同一种做法。
+// WARP 鏄惁鐢辩敤鎴蜂富鍔ㄥ惎鐢ㄣ€傛爣璁版枃浠?data\.warp-enabled锛?
+//   瀛樺湪   -> 鐢ㄦ埛甯屾湜 WARP 寮€鐫€锛堥噸鍚悗淇濇寔锛?
+//   涓嶅瓨鍦?-> 榛樿鍏抽棴锛堜骇鍝侀粯璁ょ姸鎬侊紱鍚姩鏃惰嫢鍙戠幇 WARP 杩樿繛鐫€灏辨柇寮€锛?
+// 鐢ㄦ爣璁版枃浠惰€屼笉鏄 JSON锛屾槸涓轰簡鍜?.autostart-off 淇濇寔鍚屼竴绉嶅仛娉曘€?
 bool WarpIntentEnabled() {
     std::wstring marker = g_root + L"\\data\\.warp-enabled";
     return FileExists(marker);
@@ -782,8 +782,8 @@ void SetWarpIntent(bool enabled) {
     }
 }
 
-// 启动时执行"默认关闭"：用户没启用过、但 WARP 还连着 -> 断开。
-// 只在启动时做一次，不放进定时器，避免和用户手动连接打架。
+// 鍚姩鏃舵墽琛?榛樿鍏抽棴"锛氱敤鎴锋病鍚敤杩囥€佷絾 WARP 杩樿繛鐫€ -> 鏂紑銆?
+// 鍙湪鍚姩鏃跺仛涓€娆★紝涓嶆斁杩涘畾鏃跺櫒锛岄伩鍏嶅拰鐢ㄦ埛鎵嬪姩杩炴帴鎵撴灦銆?
 void EnforceWarpDefaultOff() {
     if (WarpIntentEnabled()) return;
     if (WarpState() != 1) return;
@@ -803,18 +803,18 @@ void EnforceWarpDefaultOff() {
     }
 }
 
-// ---------------------------------------------------------------- WARP 健康告警
-// 两种"WARP 不能用"：
-//   1) 状态从 connected 变成 disconnected      -> 立刻通知
-//   2) 状态说 connected 但出口探测不通（丢包高/端点被限）
-//      -> 连续失败 2 次才通知，且 10 分钟内最多一次，避免刷屏
-// 用户主动断开时 g_warpManualStop=true，不打扰。
+// ---------------------------------------------------------------- WARP 鍋ュ悍鍛婅
+// 涓ょ"WARP 涓嶈兘鐢?锛?
+//   1) 鐘舵€佷粠 connected 鍙樻垚 disconnected      -> 绔嬪埢閫氱煡
+//   2) 鐘舵€佽 connected 浣嗗嚭鍙ｆ帰娴嬩笉閫氾紙涓㈠寘楂?绔偣琚檺锛?
+//      -> 杩炵画澶辫触 2 娆℃墠閫氱煡锛屼笖 10 鍒嗛挓鍐呮渶澶氫竴娆★紝閬垮厤鍒峰睆
+// 鐢ㄦ埛涓诲姩鏂紑鏃?g_warpManualStop=true锛屼笉鎵撴壈銆?
 bool g_warpManualStop = false;
 int g_warpLastState = -1;
 int g_warpFailStreak = 0;
 ULONGLONG g_warpLastNotify = 0;
 
-// 通过 WARP 取一个 204 端点。返回 true 表示出口可用。
+// 閫氳繃 WARP 鍙栦竴涓?204 绔偣銆傝繑鍥?true 琛ㄧず鍑哄彛鍙敤銆?
 bool WarpProbeOk() {
     std::wstring cmd =
         L"curl.exe -s --ssl-no-revoke -m 8 -o NUL -w %{http_code} "
@@ -849,11 +849,11 @@ bool WarpProbeOk() {
 void RunWarpHealthCheck() {
     CreateThread(nullptr, 0, [](LPVOID) -> DWORD {
         int st = WarpState();
-        if (st == 0) {                     // 没装客户端，什么都不做
+        if (st == 0) {                     // 娌¤瀹㈡埛绔紝浠€涔堥兘涓嶅仛
             g_warpLastState = 0;
             return 0;
         }
-        if (st != 1) {                     // 断开
+        if (st != 1) {                     // 鏂紑
             if (g_warpLastState == 1 && !g_warpManualStop && WarpIntentEnabled()) {
                 Log(L"[warp] alert: disconnected");
                 PostMessageW(g_hwnd, WM_WARP_ALERT, 1, 0);
@@ -882,7 +882,7 @@ void RunWarpHealthCheck() {
 }
 
 // ---------------------------------------------------------------- status rows
-constexpr wchar_t kAppVersion[] = L"3.13.0";
+constexpr wchar_t kAppVersion[] = L"3.13.1";
 
 // NRPT rule installed? Same key the installer writes, so status cannot lie.
 bool NrptInstalled() {
@@ -999,7 +999,7 @@ std::vector<SiteEntry> LoadSites() {
         e.url = line.substr(bar + 1);
         if (!e.label.empty() && !e.url.empty()) out.push_back(e);
     }
-    // 菜单按首字母排序：数据文件可能来自旧版本（未排序），这里再保证一次。
+    // 鑿滃崟鎸夐瀛楁瘝鎺掑簭锛氭暟鎹枃浠跺彲鑳芥潵鑷棫鐗堟湰锛堟湭鎺掑簭锛夛紝杩欓噷鍐嶄繚璇佷竴娆°€?
     std::sort(out.begin(), out.end(), [](const SiteEntry& a, const SiteEntry& b) {
         std::wstring x = a.label, y = b.label;
         for (auto& ch : x) ch = (wchar_t)towlower(ch);
@@ -1088,7 +1088,7 @@ void ShowMenu() {
     AppendMenuW(menu, MF_STRING, IDM_UPDATE, g_str.get(L"menu_update", L"Check for updates"));
     AppendMenuW(menu, MF_STRING, IDM_NAT, g_str.get(L"menu_nat", L"NAT type check"));
     {
-        // WARP 子菜单：给 Sniroute 加一条墙外出口（Google/YouTube/Play 网页版）。
+        // WARP 瀛愯彍鍗曪細缁?Sniroute 鍔犱竴鏉″澶栧嚭鍙ｏ紙Google/YouTube/Play 缃戦〉鐗堬級銆?
         int ws = WarpState();
         HMENU warpMenu = CreatePopupMenu();
         if (ws == 0) {
@@ -1129,11 +1129,11 @@ void ShowMenu() {
     AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
     AppendMenuW(menu, MF_STRING, IDM_EXIT, g_str.get(L"menu_exit", L"Exit"));
 
-    // 最底部的版权行：灰色不可点，只用来标明出处和版本。
-    // 源码保持纯 ASCII，所以 U+00A9(©) 和 U+00B7(·) 用转义写。
+    // 鏈€搴曢儴鐨勭増鏉冭锛氱伆鑹蹭笉鍙偣锛屽彧鐢ㄦ潵鏍囨槑鍑哄鍜岀増鏈€?
+    // 婧愮爜淇濇寔绾?ASCII锛屾墍浠?U+00A9(漏) 鍜?U+00B7(路) 鐢ㄨ浆涔夊啓銆?
     {
-        // 版权 + 许可分开两行：一行太长会被菜单截断，而且"All rights reserved"
-        // 单独成行不容易被误读成"这个项目不是开源的"。
+        // 鐗堟潈 + 璁稿彲鍒嗗紑涓よ锛氫竴琛屽お闀夸細琚彍鍗曟埅鏂紝鑰屼笖"All rights reserved"
+        // 鍗曠嫭鎴愯涓嶅鏄撹璇鎴?杩欎釜椤圭洰涓嶆槸寮€婧愮殑"銆?
         AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
         AppendMenuW(menu, MF_STRING | MF_GRAYED, 0,
                     L"Copyright \u00A9 2026 Kynarain. All rights reserved.");
@@ -1253,7 +1253,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             RunNatProbe();
             return 0;
         case IDM_WARP_EXPORT: {
-            // 导出不依赖客户端：CLI 会自己注册 WARP 账号并写 YAML。
+            // 瀵煎嚭涓嶄緷璧栧鎴风锛欳LI 浼氳嚜宸辨敞鍐?WARP 璐﹀彿骞跺啓 YAML銆?
             std::wstring cmd = L"cmd.exe /c \"\"" + g_cliPath + L"\" warp export\"";
             STARTUPINFOW si{};
             si.cb = sizeof(si);
@@ -1302,8 +1302,8 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         break;
 
     case WM_WARP_INSTALL_DONE: {
-        // winget 对"已安装且无更新"返回非 0（-1978335189），那不是失败。
-        // 以客户端是否真的出现为准，而不是只看退出码。
+        // winget 瀵?宸插畨瑁呬笖鏃犳洿鏂?杩斿洖闈?0锛?1978335189锛夛紝閭ｄ笉鏄け璐ャ€?
+        // 浠ュ鎴风鏄惁鐪熺殑鍑虹幇涓哄噯锛岃€屼笉鏄彧鐪嬮€€鍑虹爜銆?
         if (wp == 0 && WarpState() != 0) wp = 0;
         if (wp == 0) {
             Balloon(g_str.get(L"tip", L"sniroute"),
@@ -1334,7 +1334,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                     g_str.get(L"warp_lost_msg",
                               L"WARP is no longer connected; switching back to the local DNS plan."),
                     NIIF_WARNING);
-            // 断开不只是"出口没了"：顺手确保本地 DoH/nginx 还在，别让用户以为断网。
+            // 鏂紑涓嶅彧鏄?鍑哄彛娌′簡"锛氶『鎵嬬‘淇濇湰鍦?DoH/nginx 杩樺湪锛屽埆璁╃敤鎴蜂互涓烘柇缃戙€?
             RestoreLocalDns();
         } else if (wp == 3) {
             Balloon(g_str.get(L"tip", L"sniroute"),
@@ -1421,8 +1421,8 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
 }
 
 
-// 检查更新：跑 sniroute.cmd update check，把输出贴到气泡里。
-// 需要访问 GitHub API（私有仓库要认证），所以放后台线程，不能卡住托盘。
+// 妫€鏌ユ洿鏂帮細璺?sniroute.cmd update check锛屾妸杈撳嚭璐村埌姘旀场閲屻€?
+// 闇€瑕佽闂?GitHub API锛堢鏈変粨搴撹璁よ瘉锛夛紝鎵€浠ユ斁鍚庡彴绾跨▼锛屼笉鑳藉崱浣忔墭鐩樸€?
 void RunUpdateCheck() {
     Balloon(g_str.get(L"tip", L"sniroute"),
             g_str.get(L"update_checking", L"Checking for updates..."), NIIF_INFO);
@@ -1470,7 +1470,7 @@ void RunUpdateCheck() {
                 MultiByteToWideChar(CP_UTF8, 0, raw.data(), (int)raw.size(), text.data(), need);
             }
         }
-        // 气泡放不下多行：只保留前两行有效内容。
+        // 姘旀场鏀句笉涓嬪琛岋細鍙繚鐣欏墠涓よ鏈夋晥鍐呭銆?
         std::wstring brief;
         int lines = 0;
         size_t pos = 0;
@@ -1605,15 +1605,15 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, LPWSTR, int) {
     // Upstream addresses drift as the CDN reshuffles its fleet, so re-check them
     // every 45 minutes in the background instead of waiting for a user report.
     SetTimer(g_hwnd, TIMER_REFRESH, 45 * 60 * 1000, nullptr);
-    // WARP 健康检查：60 秒一次，失败两次才通知。
-    // 启动时先把当前状态记下来：否则"启动时已连接、随后断开"这种转换会被漏掉
-    // （第一次检查看到的是断开，而上一次状态还是未知，判定不出"从连接到断开"）。
-    // 每次启动都补跑一次 up，但**延迟 12 秒**：
-    // first-run-setup 自己也会拉起服务，立刻再跑 up 会和它抢（实测后端被互相
-    // 停掉，结果 5454 没人听、5444 返回 502）。等它结束后再补一次就稳定了。
+    // WARP 鍋ュ悍妫€鏌ワ細60 绉掍竴娆★紝澶辫触涓ゆ鎵嶉€氱煡銆?
+    // 鍚姩鏃跺厛鎶婂綋鍓嶇姸鎬佽涓嬫潵锛氬惁鍒?鍚姩鏃跺凡杩炴帴銆侀殢鍚庢柇寮€"杩欑杞崲浼氳婕忔帀
+    // 锛堢涓€娆℃鏌ョ湅鍒扮殑鏄柇寮€锛岃€屼笂涓€娆＄姸鎬佽繕鏄湭鐭ワ紝鍒ゅ畾涓嶅嚭"浠庤繛鎺ュ埌鏂紑"锛夈€?
+    // 姣忔鍚姩閮借ˉ璺戜竴娆?up锛屼絾**寤惰繜 12 绉?*锛?
+    // first-run-setup 鑷繁涔熶細鎷夎捣鏈嶅姟锛岀珛鍒诲啀璺?up 浼氬拰瀹冩姠锛堝疄娴嬪悗绔浜掔浉
+    // 鍋滄帀锛岀粨鏋?5454 娌′汉鍚€?444 杩斿洖 502锛夈€傜瓑瀹冪粨鏉熷悗鍐嶈ˉ涓€娆″氨绋冲畾浜嗐€?
     SetTimer(g_hwnd, TIMER_STARTUP_UP, 12000, nullptr);
 
-    // WARP 默认关闭：用户没主动启用过就把连着的 WARP 断掉，再记状态。
+    // WARP 榛樿鍏抽棴锛氱敤鎴锋病涓诲姩鍚敤杩囧氨鎶婅繛鐫€鐨?WARP 鏂帀锛屽啀璁扮姸鎬併€?
     EnforceWarpDefaultOff();
     g_warpLastState = WarpState();
     SetTimer(g_hwnd, TIMER_WARP, 60 * 1000, nullptr);

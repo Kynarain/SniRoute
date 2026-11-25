@@ -1603,6 +1603,35 @@ run id 45615511587
 
 **边界**：这是"取文件"通道，不是代理。把 Actions 当常驻代理违反 GitHub AUP。
 
+
+### GitHub 登录的三种方式（实测）
+
+| 方式 | 依赖的域名 | 这边可达性 | 结论 |
+|---|---|---|---|
+| `gh auth login`（设备码） | **github.com** | **000 不可达** | 需要出口 |
+| `sniroute.cmd gha login`（自实现设备码） | **github.com** | **000 不可达** | 同上，代码已备好 |
+| **PAT**（`gha auth --token`） | **api.github.com** | **200 可达** | ✅ **唯一自洽的路** |
+
+实测证据：
+
+```
+curl https://github.com/login/device/code        -> HTTP 000
+python urllib https://api.github.com/rate_limit  -> HTTP 200
+```
+
+所以在本网络里，**生成 PAT 是唯一能自己完成的登录方式**：
+
+1. 用 Tor Browser（已连上）或其它出口打开 `github.com/settings/tokens`
+2. 生成一个 classic token，scope 勾 `repo`（或对 SniRoute 仓库的 fine-grained Contents: Read/Write）
+3. `sniroute.cmd gha auth --token <PAT>`
+
+之后 `gha fetch` 全程只碰 `api.github.com`，不再需要 github.com。
+
+设备码流程保留着是有用的：一旦你的网络能访问 github.com（例如走 WARP），
+`sniroute.cmd gha login --client-id <id>` 就能用，体验比手贴 PAT 好。
+
+**安全**：PAT 存在 `data/github-token.json`，已 gitignore；用完可在 GitHub 上revoke。
+
 ## 关于哈希文件（3.10.5 起）
 
 不再随产物生成 `.sha256` / `.sha1` / `.md5` 与 `SHA256SUMS.txt` / `SHA1SUMS.txt` / `MD5SUMS.txt`。

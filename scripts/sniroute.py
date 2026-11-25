@@ -1374,11 +1374,101 @@ def _gha_download(run_id: int, out_dir: Path) -> Path | None:
     return target
 
 
+
+# ---------------------------------------------------------------- GitHub 登录（设备码）
+#
+# 为什么需要它：gha 依赖 GitHub 凭据。gh CLI 能登录，但不是每台机器都装了 gh；
+# 手填 PAT 又需要用户自己去 Setting 里点。设备码流程是"最像正常 App 登录"的方式：
+#   1. 我们向 GitHub 请求一个设备码（user_code）
+#   2. 用户在浏览器打开 github.com/login/device 输入这个码并授权
+#   3. 我们在后台轮询，拿到 token
+#
+# 前提：需要一个**已注册的 OAuth App**（client_id）。GitHub 要求所有设备码流程
+# 都绑定一个应用，不能凭空发起。注册步骤见 README，一次就够。
+GH_OAUTH_CLIENT_ID = ""
+
+
+def _gh_device_code_poll(client_id: str) -> str | None:
+    """完成设备码登录，返回 token（失败返回 None）。"""
+    import json as _json
+    import time as _t
+    import urllib.parse as _up
+    import urllib.request as _ur
+
+    def post(url: str, fields: dict) -> dict:
+        data = _up.urlencode(fields).encode()
+        req = _ur.Request(url, data=data, headers={
+            "Accept": "application/json",
+            "Content-Type": "application/x-www-form-urlencoded",
+            "User-Agent": "sniroute-gha",
+        })
+        with _ur.urlopen(req, timeout=30) as resp:
+            return _json.loads(resp.read() or b"{}")
+
+    start = post("https://github.com/login/device/code",
+                 {"client_id": client_id, "scope": "repo"})
+    if "device_code" not in start:
+        print(f"  请求设备码失败: {start}")
+        return None
+    print(f"  浏览器打开: {start.get('verification_uri', 'https://github.com/login/device')}")
+    print(f"  输入代码  : {start['user_code']}")
+    print(f"  有效期    : {start.get('expires_in', 900)} 秒")
+    interval = int(start.get("interval", 5))
+    deadline = _t.time() + int(start.get("expires_in", 900))
+    while _t.time() < deadline:
+        _t.sleep(interval)
+        res = post("https://github.com/login/oauth/access_token", {
+            "client_id": client_id,
+            "device_code": start["device_code"],
+            "grant_type": "urn:ietf:params:oauth:grant-type:device_code",
+        })
+        if res.get("access_token"):
+            return res["access_token"]
+        err = res.get("error", "")
+        if err == "authorization_pending":
+            continue
+        if err == "slow_down":
+            interval += 5
+            continue
+        print(f"  登录失败: {err} {res.get('error_description', '')}")
+        return None
+    print("  设备码已过期")
+    return None
+
+
+def cmd_gha_login(args) -> None:
+    import json as _json
+    import os as _os
+
+    client_id = args.client_id or _os.environ.get("GH_OAUTH_CLIENT_ID") or GH_OAUTH_CLIENT_ID
+    if not client_id:
+        die("缺少 OAuth App 的 client_id。\n"
+            "      1) GitHub → Settings → Developer settings → OAuth Apps → New OAuth App\n"
+            "      2) 勾选 Enable Device Flow，把 Client ID 记下来\n"
+            "      3) 运行: sniroute.cmd gha login --client-id <那串 Client ID>\n"
+            "\n"
+            "      注意：设备码流程走的是 github.com（不是 api.github.com）。\n"
+            "      实测这边 github.com 经常不可达，若登录卡住，改用 PAT：\n"
+            "        - 用 Tor Browser / 其它出口打开 github.com 生成 PAT（scope: repo）\n"
+            "        - 运行: sniroute.cmd gha auth --token <PAT>")
+    token = _gh_device_code_poll(client_id)
+    if not token:
+        die("登录未完成")
+    GH_TOKEN_FILE.write_text(_json.dumps({"token": token, "via": "device-flow"}, indent=2),
+                             encoding="utf-8")
+    print(f"已保存凭据：{GH_TOKEN_FILE}")
+    print("提示：想更安全的话，装 gh CLI 并 gh auth login，然后把该文件删掉。")
+
+
 def cmd_gha(args) -> None:
     import datetime
     import shutil as _sh
     import tempfile as _tf
     action = args.action
+
+    if action == "login":
+        cmd_gha_login(args)
+        return
 
     if action == "auth":
         if not args.token:
@@ -2336,11 +2426,12 @@ def main() -> None:
     p.set_defaults(func=cmd_warp)
 
     p = sub.add_parser("gha", help="用 GitHub Actions 的 runner 下载文件（墙外取文件通道）")
-    p.add_argument("action", choices=["status", "fetch", "auth", "runs"])
+    p.add_argument("action", choices=["status", "fetch", "auth", "runs", "login"])
     p.add_argument("url", nargs="?", default="", help="fetch 时必填")
     p.add_argument("-o", "--output", default="", help="保存到哪个文件")
     p.add_argument("--name", default="", help="目标文件名（留空由 URL 决定）")
     p.add_argument("--token", default="", help="auth 时保存的 PAT")
+    p.add_argument("--client-id", default="", help="login 时的 OAuth App Client ID")
     p.set_defaults(func=cmd_gha)
 
     p = sub.add_parser("update", help="检查是否有新版本")
