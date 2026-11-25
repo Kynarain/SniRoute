@@ -1797,6 +1797,35 @@ sniroute.cmd cloud fetch <目标URL> --provider cf -o out.bin
 公开 URL 不校验会被刷额度。这两份服务端代码只做 HTTP(S) 转发，不是代理/隧道。
 
 
+
+## 空 SNI + Host 头：能用，但有明确边界（实测）
+
+这是 `loopback` 模式上游那一跳的原理。实测各站点在**完全不发 SNI**、只用 Host 头时的反应：
+
+| 目标 | 空 SNI 握手 | 用 Host 头取内容 |
+|---|---|---|
+| www.google.com | ✅ | **302** |
+| i.pximg.net（Akamai） | ✅ | **200** |
+| store.steampowered.com | ✅ | **200** |
+| github.com | ✅ | **200** |
+| www.vrchat.com（Cloudflare） | ❌ handshake_failure | — |
+| www.pixiv.net（Cloudflare） | ❌ handshake_failure | — |
+
+结论：**服务器接受无 SNI，才可以用 Host 选站点**。Cloudflare 强制要求 SNI，
+所以 CF 上的站点（pixiv 主站、VRChat 官网）这条路过不去。
+
+**客户端那一侧不能空 SNI**：浏览器必须对目标域名做 TLS，否则证书校验不过。
+所以正确的组合是两跳：
+
+```
+浏览器 --TLS(SNI=目标域名，本机 CA 签的证书)--> 本机 nginx
+本机 nginx --TLS(空 SNI，只带 Host)--> 真实服务器
+```
+
+第一跳靠我们把 CA 装进信任库解决；第二跳靠服务器接受无 SNI。
+两跳任何一环不成立，这条路就用不了。
+
+
 ## 关于哈希文件（3.10.5 起）
 
 不再随产物生成 `.sha256` / `.sha1` / `.md5` 与 `SHA256SUMS.txt` / `SHA1SUMS.txt` / `MD5SUMS.txt`。
