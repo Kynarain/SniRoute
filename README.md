@@ -1826,6 +1826,34 @@ sniroute.cmd cloud fetch <目标URL> --provider cf -o out.bin
 两跳任何一环不成立，这条路就用不了。
 
 
+
+## QUIC（UDP 443）当前实测：不稳定，不能当主力
+
+理论上 QUIC 最理想：SNI 在加密的 ClientHello 里，审查者看不到。但实测要看网络状态。
+
+**同一时段的对照（2026-11-25 晚，中国移动家宽）：**
+
+| 测试 | 结果 |
+|---|---|
+| 强制 QUIC 到 www.cloudflare.com（确定支持 h3）| `ERR_QUIC_PROTOCOL_ERROR` |
+| 强制 QUIC 到 www.google.com / www.pixiv.net | 同上 |
+| UDP 53 到 9.9.9.9 | ✅ 有回包 |
+| UDP 3478（STUN）到 stun.cloudflare.com | ✅ 有回包 |
+| UDP 53 到 8.8.8.8 / 1.1.1.1 | ❌ 超时 |
+
+结论：**不是 UDP 全封，而是 UDP 443 被单独限制**（运营商对 QUIC 的常见处理）。
+所以 QUIC 只能"能通时当加速"，不能当作可靠路径。
+
+**好消息：ECH 不依赖 QUIC。** 同一时段实测：
+
+```
+Chrome 打开 https://www.pixiv.net/  -> DOM 74266 字节，无错误
+```
+
+说明走 TCP + ECH 依然有效。这也是为什么 pixiv 条目用 `ech` 模式并配
+`ech_fallback: dns`——QUIC 不通时自动退回 TCP，不影响可用性。
+
+
 ## 关于哈希文件（3.10.5 起）
 
 不再随产物生成 `.sha256` / `.sha1` / `.md5` 与 `SHA256SUMS.txt` / `SHA1SUMS.txt` / `MD5SUMS.txt`。
