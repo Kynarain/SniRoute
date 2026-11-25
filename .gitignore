@@ -63,3 +63,6 @@ data/*.tmp
 # GitHub 凭据（PAT）与仓库覆盖配置
 data/github-token.json
 data/github.json
+
+# ��ͨ��ƾ��
+data/cloud.json

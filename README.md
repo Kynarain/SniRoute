@@ -1746,6 +1746,57 @@ CF 在这些端口都正常服务（未封 SNI 全部握手成功），所以 RS
 但"监听"与"能否绕过"是两件事——上面已经证明绕过不了。
 
 
+
+## 云通道：用各自的账号额度（3.16.0）
+
+工具里**不内置任何共享凭据**。每个人用自己的账号和额度，通道分两类：
+
+### 基础设施型（自动探测，无需配置）
+
+```powershell
+sniroute.cmd cloud list          # 看本机有哪些可用
+sniroute.cmd cloud fetch <url>   # 自动挑一个（tor > warp > github-actions）
+sniroute.cmd cloud fetch <url> --provider tor -o out.bin
+```
+
+实测：
+
+```
+tor              {'type': 'socks5', 'host': '127.0.0.1', 'port': 9150}
+warp             {'type': 'system-tunnel'}
+github-actions   {'type': 'gha', 'repo': 'Kynarain/SniRoute'}
+```
+
+```
+cloud fetch https://example.com/ --provider tor  -> 已保存 577 字节
+cloud fetch https://www.google.com/ --provider tor -> 已保存 87088 字节
+```
+
+注：Tor 出口被 Cloudflare 的某些站点拒绝（`api.vrchat.cloud` 返回 403 + error code 1005），
+这是目标站点的策略，不是通道故障。
+
+### 自建 URL 通道（用自己的 CF Worker / Lambda / Deno）
+
+仓库里带两个可直接部署的服务端：
+
+| 文件 | 平台 | 部署 |
+|---|---|---|
+| `worker/proxy-worker.js` | Cloudflare Worker | 贴进 Worker，设环境变量 `TOKEN` |
+| `tools/lambda-proxy.py` | AWS Lambda Function URL | 贴进函数，认证选 NONE，设 `TOKEN` |
+
+部署后在本地登记：
+
+```powershell
+sniroute.cmd cloud add --name cf     --template "https://<你的域名>/proxy?url={url}" --token <同一个 TOKEN>
+sniroute.cmd cloud fetch <目标URL> --provider cf -o out.bin
+```
+
+模板占位符：`{url}`（URL 编码）、`{url_raw}`（不编码）。
+
+**安全**：`data/cloud.json` 存 token，已 gitignore；服务端务必校验 `TOKEN`，
+公开 URL 不校验会被刷额度。这两份服务端代码只做 HTTP(S) 转发，不是代理/隧道。
+
+
 ## 关于哈希文件（3.10.5 起）
 
 不再随产物生成 `.sha256` / `.sha1` / `.md5` 与 `SHA256SUMS.txt` / `SHA1SUMS.txt` / `MD5SUMS.txt`。

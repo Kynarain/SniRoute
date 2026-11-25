@@ -1596,6 +1596,192 @@ def cmd_gha_login(args) -> None:
     print("提示：想更安全的话，装 gh CLI 并 gh auth login，然后把该文件删掉。")
 
 
+
+# ---------------------------------------------------------------- 云通道（自带账号）
+#
+# 设计目标：每个用户用自己的账号和额度，不在工具里内置任何共享凭据。
+#
+# 通道分两类：
+#   基础设施型（自动探测）：tor / warp / github-actions
+#   URL 模板型（用户自建）：任何能"接收 ?url= 并返回内容"的 HTTP 端点
+#     Cloudflare Worker / AWS Lambda Function URL / Deno Deploy / Vercel...
+#
+# 模板里用 {url} 占位（会被 urlencode），{url_raw} 表示不编码。
+CLOUD_CFG = ROOT / "data" / "cloud.json"
+
+
+def _cloud_load() -> dict:
+    import json as _json
+    try:
+        return _json.loads(CLOUD_CFG.read_text(encoding="utf-8"))
+    except Exception:
+        return {"providers": {}}
+
+
+def _cloud_save(doc: dict) -> None:
+    import json as _json
+    CLOUD_CFG.write_text(_json.dumps(doc, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def cloud_detect() -> dict:
+    """探测本机可用的基础设施型通道。"""
+    found = {}
+    # Tor：SOCKS 9150（Tor Browser）或 9050（系统 tor）
+    for port in (9150, 9050):
+        if port_listener_pid(port):
+            found["tor"] = {"type": "socks5", "host": "127.0.0.1", "port": port}
+            break
+    # WARP：warp-cli 存在且已注册
+    if find_warp_cli() is not None and warp_state() != "missing":
+        found["warp"] = {"type": "system-tunnel"}
+    # GitHub Actions
+    if gh_cli_ok() or gh_token():
+        found["github-actions"] = {"type": "gha", "repo": gh_slug()}
+    return found
+
+
+def _urlencode(s: str) -> str:
+    import urllib.parse as _up
+    return _up.quote(s, safe="")
+
+
+def cmd_cloud(args) -> None:
+    import json as _json
+    import os as _os
+    import time as _t
+    import shutil as _sh
+    import urllib.request as _ur
+
+    doc = _cloud_load()
+    providers = doc.setdefault("providers", {})
+    action = args.action
+
+    if action == "list":
+        print("基础设施型（自动探测）：")
+        det = cloud_detect()
+        for name, info in det.items():
+            print(f"  {name:<16} {info}")
+        if not det:
+            print("  （无：没有 Tor / WARP / gh 登录）")
+        print("\n自建 URL 通道：")
+        if not providers:
+            print("  （无：用 cloud add --name ... --template ... 添加）")
+        for name, info in providers.items():
+            tok = "有" if info.get("token") else "无"
+            print(f"  {name:<16} {info.get('template','')}  token={tok}")
+        return
+
+    if action == "add":
+        if not args.name or not args.template:
+            die("用法：sniroute.cmd cloud add --name cf --template \"https://x/proxy?url={url}\" [--token T]")
+        if "{url}" not in args.template and "{url_raw}" not in args.template:
+            die("模板里必须有 {url} 或 {url_raw} 占位符")
+        providers[args.name] = {
+            "template": args.template,
+            "token": args.token or "",
+            "added": _t.strftime("%Y-%m-%dT%H:%M:%S"),
+        }
+        _cloud_save(doc)
+        print(f"已添加通道 {args.name}")
+        print("凭据存在 data/cloud.json（已 gitignore）。")
+        return
+
+    if action == "remove":
+        if args.name in providers:
+            providers.pop(args.name)
+            _cloud_save(doc)
+            print(f"已移除 {args.name}")
+        else:
+            die(f"没有 {args.name}")
+        return
+
+    if action == "fetch":
+        if not args.url:
+            die("用法：sniroute.cmd cloud fetch <url> [--provider name] [-o 文件]")
+        name = args.provider or ""
+        det = cloud_detect()
+        if not name:
+            for cand in ("tor", "warp", "github-actions"):
+                if cand in det:
+                    name = cand
+                    break
+            if not name and providers:
+                name = next(iter(providers))
+        if not name:
+            die("没有可用通道。先 cloud list 看看，或 cloud add 一个。")
+
+        out = Path(args.output) if args.output else (Path.cwd() / "cloud-download.bin")
+
+        if name == "tor":
+            info = det.get("tor")
+            if not info:
+                die("Tor 未运行（SOCKS 9150/9050 都没监听）")
+            cmd = ["curl.exe", "-s", "--ssl-no-revoke", "-L", "-m", "180",
+                   "--socks5-hostname", f"{info['host']}:{info['port']}",
+                   "-o", str(out), "-w", "%{http_code}", args.url]
+            proc = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace")
+            code = (proc.stdout or "").strip()
+            if code == "200" and out.is_file():
+                print(f"已通过 Tor 保存 {out}（{out.stat().st_size} 字节）")
+            else:
+                die(f"Tor 通道失败（HTTP {code}）: {(proc.stderr or '')[:150]}")
+            return
+
+        if name == "warp":
+            if warp_state() != "connected":
+                die("WARP 未连接：sniroute.cmd warp on")
+            cmd = ["curl.exe", "-s", "--ssl-no-revoke", "-L", "-m", "180",
+                   "-o", str(out), "-w", "%{http_code}", args.url]
+            proc = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace")
+            code = (proc.stdout or "").strip()
+            print(f"已通过 WARP 保存 {out}" if code == "200" and out.is_file()
+                  else f"WARP 通道失败（HTTP {code}）")
+            return
+
+        if name == "github-actions":
+            ns = __import__("argparse").Namespace(
+                action="fetch", url=args.url, output=str(out), name="", token="", yes=False)
+            cmd_gha(ns)
+            return
+
+        info = providers.get(name)
+        if not info:
+            die(f"未知通道 {name}（cloud list 看可用的）")
+        url = info["template"].replace("{url}", _urlencode(args.url)).replace("{url_raw}", args.url)
+        headers = {"User-Agent": "sniroute-cloud"}
+        if info.get("token"):
+            headers["X-Relay-Token"] = info["token"]
+            headers["Authorization"] = f"Bearer {info['token']}"
+        print(f"通过 {name} 请求…")
+        req = _ur.Request(url, headers=headers)
+        with _ur.urlopen(req, timeout=300) as resp:
+            data = resp.read()
+        # 如果响应是 JSON 且含 base64 字段，按约定解出来
+        try:
+            j = _json.loads(data)
+            if isinstance(j, dict) and j.get("encoding") == "base64":
+                import base64 as _b64
+                data = _b64.b64decode(j["body"])
+        except Exception:
+            pass
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_bytes(data)
+        print(f"已通过 {name} 保存 {out}（{len(data)} 字节）")
+        return
+
+    if action == "test":
+        name = args.provider or ""
+        det = cloud_detect()
+        targets = [name] if name else list(det) + list(providers)
+        if not targets:
+            die("没有可测的通道")
+        for t in targets:
+            print(f"  {t:<16} {'探测到' if (t in det or t in providers) else '未配置'}")
+        return
+
+    die(f"未知动作 {action!r}")
+
+
 def cmd_gha(args) -> None:
     import datetime
     import shutil as _sh
@@ -2590,6 +2776,16 @@ def main() -> None:
     p.add_argument("-o", "--output", default="", help="export 时输出路径")
     p.add_argument("--renew", action="store_true", help="export 时重新注册 WARP 账号")
     p.set_defaults(func=cmd_warp)
+
+    p = sub.add_parser("cloud", help="云通道：用各自的账号额度取文件（tor / warp / gha / 自建 URL）")
+    p.add_argument("action", choices=["list", "add", "remove", "fetch", "test"])
+    p.add_argument("url", nargs="?", default="", help="fetch 的目标 URL")
+    p.add_argument("--name", default="", help="add/remove 的通道名")
+    p.add_argument("--template", default="", help="add 时的 URL 模板（含 {url}）")
+    p.add_argument("--token", default="", help="add 时的共享密钥")
+    p.add_argument("--provider", default="", help="fetch 用哪个通道")
+    p.add_argument("-o", "--output", default="", help="保存路径")
+    p.set_defaults(func=cmd_cloud)
 
     p = sub.add_parser("gha", help="用 GitHub Actions 的 runner 下载文件（墙外取文件通道）")
     p.add_argument("action", choices=["status", "fetch", "auth", "runs", "login", "config", "fork"])
