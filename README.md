@@ -1544,6 +1544,35 @@ SNI 和握手指纹。所以对 URL 做编码，从头到尾都不在关键路�
   延迟 1–3 秒，且大量站点对 Tor 出口 IP 直接给验证码或拒绝；
 * 定位应当是**最后备胎**：纯文本浏览、紧急取一份配置，不适合下载/视频/游戏。
 
+
+## 用 GitHub Actions 当"下载中继"
+
+`.github/workflows/fetch.yml` 提供一条通道：让 GitHub 的 runner（墙外）去取一个 URL，
+再以 artifact 的形式交回本机。适合"墙内下不到某个文件"的场景。
+
+```powershell
+# 触发下载
+gh workflow run fetch.yml -R Kynarain/SniRoute `
+    -f url=https://dist.torproject.org/torbrowser/16.0.3/sha256sums-signed-build.txt `
+    -f filename=tor-sums.txt
+
+# 等跑完后取回
+gh run list -R Kynarain/SniRoute --limit 3
+gh run download <run-id> -R Kynarain/SniRoute -n fetch -D .\out
+```
+
+实测效果：
+
+| 步骤 | 结果 |
+|---|---|
+| runner 取 `dist.torproject.org` 目录 | ✅ 11 秒完成 |
+| 取 16.0.3 官方 sha256sums | ✅ 5029 B |
+| 本机 `gh run download` | ✅ 正常取回 |
+| 用官方值和本地文件比对 | ✅ 完全一致 |
+
+**边界**：这是"取文件"的通道，不是代理或隧道。runner 是临时环境、没有入向连接，
+把 Actions 当常驻代理/通用计算用违反 GitHub 的 AUP，会导致账号被限制。
+单次取文件属于正常 CI 用法（下载 + 上传 artifact）。
 ## 关于哈希文件（3.10.5 起）
 
 不再随产物生成 `.sha256` / `.sha1` / `.md5` 与 `SHA256SUMS.txt` / `SHA1SUMS.txt` / `MD5SUMS.txt`。
