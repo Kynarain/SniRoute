@@ -65,11 +65,24 @@ USENIX Security 2024（`usenixsecurity24-xue-fingerprinting.pdf`）。
 | 仅靠 padding + 多路复用的混淆**有结构性上限** | 减少不了流量突发大小与 RTT 数 |
 | 实测部署在百万用户级 ISP，误伤很小 | 不是理论推演 |
 
+### 检测器是怎么工作的（细节）
+
+- **特征**：把一条流的方向+包长序列转成 **n-gram**（+ 表示出站，− 表示入站），
+  例如 `(+517, −1400, −1400)` 就是"ClientHello 后跟分段的 ServerHello"
+- **为什么用 n-gram**：1-gram 分不出"批量传输"和"交互式握手"，3-gram 最好
+  （2/3/4-gram 都试过，3-gram 在效果与内存间最平衡）
+- **分类方式**：相似度分类，与训练集比距离，`min(Dis) ≤ γ` 判为代理流量；
+  作者认为这比聚类/监督学习更适合审查者部署（算得快、误报可控）
+- **部署规模**：Merit 骨干网 50 Gbps、23 个 Zeek 实例、PF_Ring 加速
+- **效果**：23 种混淆配置（shadowsocks、vmess、trojan、vless、httpt）**TPR 全部 > 70%**
+- **padding 为什么没用**：填充改变不了"嵌套握手"的**包长序列模式**
+- **multiplexing 为什么只是缓解**：它减少连接数，但减少不了突发大小与 RTT 数
+
 ### 对 Sniroute 的约束
 
 - **新功能不做"隧道套 TLS"**：本机 loopback 是本地终结，线路上仍是单层 TLS；
   Worker 反代也是单层 TLS——这两类安全
-- 任何"把用户的 TLS 再包进另一层 TLS"的设计，都要先假定它可被识别
+- 任何"把用户的 TLS 再包进另一层 TLS"的设计，都要先假定它能被 n-gram 识别
 - 这条约束写进了本项目的设计原则
 
 ---
@@ -165,3 +178,50 @@ Chrome 实测（`--log-net-log`）：打开 pixiv 会建立 `QUIC_SESSION`，页
 - R. Ensafi. *Ethical, Scale, and Continuity Concerns for Censorship Measurement.* IETF HRPC slides 102.
 - D. Xue, M. Kallitsis, A. Houmansadr, et al. *Fingerprinting Obfuscated Proxy Traffic with Encapsulated TLS Handshakes.* USENIX Security 2024.
 - A. Zohaib, Q. Zao, J. Sippe, A. Alaraj, A. Houmansadr, Z. Durumeric, E. Wustrow. *Exposing and Circumventing SNI-based QUIC Censorship of the Great Firewall of China.* USENIX Security 2025.
+
+---
+
+## 附：端口规则验证（本机实测，负结果）
+
+Zohaib 附录提到 GFW 的过滤规则之一是"**源端口 > 目的端口** 时触发"。
+我们用 `tools/quic-sni-test.py --src-port` 在本机复现，**没有复现出来**。
+
+### 方法
+
+选"HTTPS 记录声明了 h3、TCP 443 可达、QUIC 默认源端口超时"的域名：
+`www.twitter.com`（69.171.235.22）、`www.facebook.com`（157.240.7.20）。
+
+| 域名 | src=50000 (>443) | src=80 (<443) | src=53 (<443) |
+|---|---|---|---|
+| www.twitter.com | 超时 0/2 | **超时 0/2** | **超时 0/2** |
+| www.facebook.com | 超时 0/2 | **超时 0/2** | **超时 0/2** |
+
+对照（证明低端口绑定与 QUIC 本身没问题）：
+
+```
+www.pixiv.net src=80 -> 成功 2/2
+```
+
+### 结论
+
+- 在这条链路上，改变源端口**不能**绕过 QUIC 封锁
+- 论文的测量时间是 2024-10，本机是 2026-11；规则可能已调整，也可能
+  被更强的、与端口无关的封锁覆盖
+- **不要指望端口技巧**；`--src-port` 保留下来是为了以后能重新验证
+
+### Artifact 数据
+
+论文 artifact 仓库（`github.com/gfw-report/usenixsecurity25-quic-sni`）：
+
+- 每日 QUIC 黑名单：`sni-blocklist/daily_blocklist/2024-10-17_quic_blocklist.txt`
+  （本机抓到 27,786 个域名）
+- 每周统计：约 4.1~4.7 万域名/周（与正文的 43.8K 一致）
+- 端口规则实验目录：`experiments/rule-srcport-greater-than-dst-port/`
+  （含 1-65000 的端口热力图 CSV）
+- 归档：DOI `10.5281/zenodo.15606165`
+
+### 一个方法学提醒
+
+从黑名单里抽样测试时，先确认"该 IP 会不会回 QUIC"——否则超时会把
+"服务器不支持 h3"误判成"被墙"。本机实测里 `*.b-cdn.net` 就是这种：
+TCP 可达、QUIC 超时，但它们的 HTTPS 记录里根本没有 h3。
