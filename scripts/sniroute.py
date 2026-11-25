@@ -1237,8 +1237,45 @@ def _gh_cfg() -> dict:
         return {}
 
 
+def _gh_login() -> str | None:
+    """当前 gh CLI 登录账号（不依赖网络：gh auth token 只读本地 keyring）。"""
+    if not gh_cli_ok():
+        return None
+    try:
+        proc = _gh_run(["gh", "api", "user", "--jq", ".login"], timeout=25)
+        login = (proc.stdout or "").strip()
+        if login and proc.returncode == 0:
+            return login
+    except Exception:
+        pass
+    # 网络不通时用 auth status 的文本兜底：它会把账号名打出来
+    try:
+        proc = _gh_run(["gh", "auth", "status"], timeout=20)
+        import re as _re
+        m = _re.search(r"account (\S+)", (proc.stdout or "") + (proc.stderr or ""))
+        if m:
+            return m.group(1)
+    except Exception:
+        pass
+    return None
+
+
 def gh_slug() -> str:
-    return _gh_cfg().get("repo") or GH_SLUG
+    """workflow 跑在哪个仓库。
+
+    顺序：
+      1) data/github.json 里显式配置
+      2) **当前 gh 登录账号**下的同名仓库 —— 别人 fork 后就是这个形态，
+         不需要改配置、更不需要作者的 token
+      3) 作者仓库（仅兜底）
+    """
+    cfg = _gh_cfg().get("repo")
+    if cfg:
+        return cfg
+    login = _gh_login()
+    if login:
+        return f"{login}/SniRoute"
+    return GH_SLUG
 
 
 def gh_token() -> str | None:
@@ -1264,12 +1301,23 @@ def _gh_run(cmd, timeout=60, **_ignored):
 
 
 def gh_cli_ok() -> bool:
+    """本机是否有可用的 gh 登录。
+
+    注意：`gh auth status` 会连 api.github.com，网络抖动时返回非 0，但凭据仍在本地。
+    所以网络失败时退一步用 `gh auth token`（纯本地读 keyring）判断是否登录过；
+    网络错误应该在真正发请求时报，而不是被误判成"没登录"。
+    """
     import shutil as _sh
     if not _sh.which("gh"):
         return False
     try:
-        proc = _gh_run(["gh", "auth", "status"], capture_output=True, text=True, timeout=15)
-        return proc.returncode == 0
+        if _gh_run(["gh", "auth", "status"], timeout=15).returncode == 0:
+            return True
+    except Exception:
+        pass
+    try:
+        proc = _gh_run(["gh", "auth", "token"], timeout=15)
+        return proc.returncode == 0 and bool((proc.stdout or "").strip())
     except Exception:
         return False
 
@@ -1465,6 +1513,24 @@ def cmd_gha(args) -> None:
     import shutil as _sh
     import tempfile as _tf
     action = args.action
+
+    if action == "config":
+        # 别人用这份工具时，必须把仓库改成他们自己的 fork，否则会往作者仓库发
+        # workflow_dispatch（需要写权限，对方也不该有）。默认值只适合本机作者。
+        import json as _json
+        cfg_path = ROOT / "data" / "github.json"
+        if not args.repo:
+            print(f"当前仓库: {gh_slug()}")
+            print(f"配置文件: {cfg_path}（不存在则用默认 {GH_SLUG}）")
+            print("用法: sniroute.cmd gha config --repo <owner/name>")
+            return
+        slug = args.repo.strip()
+        if "/" not in slug:
+            die("仓库格式应为 owner/name")
+        cfg_path.write_text(_json.dumps({"repo": slug}, indent=2), encoding="utf-8")
+        print(f"已设置仓库: {slug}")
+        print("该仓库需要有 .github/workflows/fetch.yml（fork 本仓库即可）。")
+        return
 
     if action == "login":
         cmd_gha_login(args)
@@ -2426,12 +2492,13 @@ def main() -> None:
     p.set_defaults(func=cmd_warp)
 
     p = sub.add_parser("gha", help="用 GitHub Actions 的 runner 下载文件（墙外取文件通道）")
-    p.add_argument("action", choices=["status", "fetch", "auth", "runs", "login"])
+    p.add_argument("action", choices=["status", "fetch", "auth", "runs", "login", "config"])
     p.add_argument("url", nargs="?", default="", help="fetch 时必填")
     p.add_argument("-o", "--output", default="", help="保存到哪个文件")
     p.add_argument("--name", default="", help="目标文件名（留空由 URL 决定）")
     p.add_argument("--token", default="", help="auth 时保存的 PAT")
     p.add_argument("--client-id", default="", help="login 时的 OAuth App Client ID")
+    p.add_argument("--repo", default="", help="config 时的 owner/name")
     p.set_defaults(func=cmd_gha)
 
     p = sub.add_parser("update", help="检查是否有新版本")

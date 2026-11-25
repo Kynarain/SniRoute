@@ -1632,6 +1632,35 @@ python urllib https://api.github.com/rate_limit  -> HTTP 200
 
 **安全**：PAT 存在 `data/github-token.json`，已 gitignore；用完可在 GitHub 上revoke。
 
+
+### 别人怎么用：本地 gh 登录即可（3.13.3 起自动识别）
+
+**不需要**填 token、不需要改配置文件。只要对方本机满足：
+
+1. 装过 `gh` 并 `gh auth login` 过
+2. 账号下有一个带 `.github/workflows/fetch.yml` 的仓库（fork 本仓库即可）
+
+Sniroute 会**自动把仓库解析成 `<对方的 gh 账号>/SniRoute`**：
+
+```
+gh_cli_ok: True
+_gh_login: <对方的账号>
+gh_slug  : <对方账号>/SniRoute
+```
+
+如果对方的仓库不叫 SniRoute，显式指定一次：
+
+```powershell
+sniroute.cmd gha config --repo <owner/name>
+```
+
+**为什么要 fork**：`workflow_dispatch` 需要对仓库有写权限。用作者仓库会失败——
+作者也不该把 token 给别人。fork 之后额度、日志、artifact 都算对方自己的。
+
+**网络抖动的处理**：`gh auth status` 会连 `api.github.com`，断网时返回非 0，
+但凭据仍在本地 keyring。所以判断顺序是：先 `gh auth status`，失败再 `gh auth token`
+（纯本地）——不会把"网络不通"误报成"没登录"。
+
 ## 关于哈希文件（3.10.5 起）
 
 不再随产物生成 `.sha256` / `.sha1` / `.md5` 与 `SHA256SUMS.txt` / `SHA1SUMS.txt` / `MD5SUMS.txt`。

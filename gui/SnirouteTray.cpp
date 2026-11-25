@@ -584,9 +584,9 @@ bool CaTrusted() {
            wide.find(L"sniroute") != std::wstring::npos;
 }
 
-// WARP 鏄惁宸茶繛鎺ャ€傝繑鍥?0=鏈畨瑁?1=宸茶繛鎺?2=鏈繛鎺ャ€?
-// 鐢?warp-cli status 鍒ゅ畾锛岃€屼笉鏄湅缃戝崱锛歁ASQUE 鍗忚涓嬬綉鍗″湪浣嗘祦閲忓彲鑳戒笉閫氾紝
-// 鍙湁 status 璇?Connected 鎵嶄唬琛ㄥ鎴风璁や负闅ч亾鍙敤銆?
+// WARP 闁哄嫷鍨伴幆浣割啅閼煎墎绠鹃柟鎭掑劘閳ь剙鍊界换鎴﹀炊?0=闁哄牜浜滈悾銊ф啑?1=鐎规瓕灏换娑㈠箳?2=闁哄牜浜ｇ换娑㈠箳閵夛絺鍋?
+// 闁?warp-cli status 闁告帇鍊曢悾楣冩晬瀹€鍐ｅ亾鐏炶偐鐟濋柡鍕靛灣濠€鍛磾閹存繂骞㈤柨娑欑搲ASQUE 闁告绻楅鍛▔鐎ｎ剛绉归柛妞烩偓铏含濞达絽妫欑粊锕傛煂韫囨挸璁查柤铏灊缁楀鏌呭鍓х
+// 闁告瑯浜濆﹢?status 閻?Connected 闁归潧绉抽崬顒傛偘閵娿儺鍚傞柟鎾棑椤忣剛鎷嬮妶鍕闂傚憞鍥﹀闁告瑯鍨抽弫銈夊Υ?
 int WarpState() {
     static const wchar_t* kCandidates[] = {
         L"C:\\Program Files\\Cloudflare\\Cloudflare WARP\\warp-cli.exe",
@@ -629,7 +629,7 @@ int WarpState() {
     return 2;
 }
 
-// 閫氳繃 sniroute.cmd 鎵ц warp on/off锛屼笉绛夊緟锛坵arp-cli 杩炴帴鍙兘瑕佸嚑绉掞級銆?
+// 闂侇偅淇虹换?sniroute.cmd 闁圭瑳鍡╂斀 warp on/off闁挎稑濂旂粭澶岀驳婢跺﹦绐￠柨娑樻緥arp-cli 閺夆晝鍋炵敮鎾矗椤栨繂鍘撮悷鏇氱閸ゆ垹绮旈幒鐐电闁?
 void RunWarpAction(const wchar_t* action) {
     std::wstring cmdline = L"cmd.exe /c \"\"" + g_cliPath + L"\" warp " + action + L"\"";
     Log(L"[warp] " + cmdline);
@@ -650,16 +650,16 @@ void RunWarpAction(const wchar_t* action) {
 }
 
 
-// 鐢?winget 瀹夎 Cloudflare WARP銆傝蛋瀹樻柟婧愶紝涓嶈嚜宸卞垎鍙戝畨瑁呭寘銆?
-// 浼氬脊涓€娆?UAC锛圵ARP 瑕佽鏈嶅姟鍜岄┍鍔級锛屽畨瑁呭畬鍒锋柊鑿滃崟鐘舵€併€?
+// 闁?winget 閻庣懓顦抽ˉ?Cloudflare WARP闁靛棗鍊介摂瀣偓瑙勆戦弻鐔封攦閹板墎绀夊☉鎾崇Х閸ゆ粌顔忛崡鐐茬€婚柛娆愬灥閻ｃ劎鎲楅崨顓炵樁闁?
+// 濞村吋鑹鹃懘濠冪▔閳ь剙鈻?UAC闁挎稑婀笰RP 閻熸洑娴囬ˉ濠囧嫉瀹ュ懎顫ら柛婊冪焸閳瑰秹宕濋…鎺旂闁挎稑鑻悾銊ф啑閸涱厾鏆氶柛鎺楁敱閺屽﹪鎳ｅ鍐ㄧ闁绘鍩栭埀顑块檷閳?
 void RunWarpInstall() {
     Balloon(g_str.get(L"tip", L"sniroute"),
             g_str.get(L"warp_installing", L"Installing Cloudflare WARP (winget or official package)..."),
             NIIF_INFO);
     Log(L"[warp] winget install start");
     CreateThread(nullptr, 0, [](LPVOID) -> DWORD {
-        // 浜ょ粰 CLI锛氬畠浼氬厛璇?winget锛屾病鏈?winget 灏变笅杞?Cloudflare 瀹樻柟瀹夎鍖呫€?
-        // 涓嶆槸姣忓彴 Windows 閮芥湁 winget锛圠TSC銆佺簿绠€鐗堝父瑙侊級銆?
+        // 濞存嚎鍊楃划?CLI闁挎稒鑹鹃悾鐘冲濮橆剙甯ラ悹?winget闁挎稑鏈惀鍛村嫉?winget 閻忓繐褰夌粭鍛姜?Cloudflare 閻庤蓱閺岀喓鈧懓顦抽ˉ濠囧礌閸涱偀鍋?
+        // 濞戞挸绉靛Σ绋啃掕箛鎾抽叡 Windows 闂侇喛濮ゅ﹢?winget闁挎稑婀SC闁靛棔鑳剁花璺ㄧ不閳ь剟鎮ч崼婵堝煑閻熸瑤绶ょ槐姘跺Υ?
         std::wstring cmd = L"cmd.exe /c \"\"" + g_cliPath + L"\" warp install\"";
         STARTUPINFOW si{};
         si.cb = sizeof(si);
@@ -684,13 +684,13 @@ void RunWarpInstall() {
 }
 
 
-// WARP 鏂紑鍚庢妸鏈湴 DNS 鏂规鎷夊洖鏉ャ€?
+// WARP 闁哄偆鍘肩槐鎴﹀触鎼淬垹惟闁哄牜鍓欏﹢?DNS 闁哄倽顫夐、宥夊箯婢跺﹥绀€闁哄鍎埀?
 //
-// 涓轰粈涔堥渶瑕佸畠锛歐ARP 鏄暣鏈洪毀閬擄紝瀹冩帀绾挎椂鐢ㄦ埛寰€寰€浠ヤ负"缃戞柇浜?锛岃€屽疄闄呬笂鏈湴
-// DoH/nginx 鍙兘鍥犱负鍗囩骇銆佸穿婧冦€佹垨浠庢湭鍚姩鑰岀己澶便€傝繖閲屽仛涓や欢浜嬶細
-//   1) 妫€鏌?5444(DoH 鍓嶇疆) / 5454(DoH 鍚庣) / 443(nginx) 鏄惁閮藉湪鍚?
-//   2) 缂轰换鎰忎竴涓氨璺戜竴娆?sniroute.cmd up 鎶婂畠浠媺璧锋潵
-// 鍏ㄩ儴灏辩华鍚庡脊鎻愮ず锛岃鐢ㄦ埛鐭ラ亾"宸茬粡鍒囧洖鏈湴 DNS 鏂规"銆?
+// 濞戞捁妗ㄧ划鍫熺▕閸儲浠橀悷鏇氱閻ｇ娀鏁嶅鎬塕P 闁哄嫷鍨遍弳锝夊嫉濞差亝鐦堥梺顒佹惈缁辨繄鈧懓鍟敮鈧紒鐐濡炲倿鎮介妸锕€鐓曠€垫壋鍋撶€垫壋鍋撳ù鐘劙鐠?缂傚啯鍨堕弻鍥ㄧ?闁挎稑鐭侀埀顒€鑻悿鍕⒔閸涱剛鐟愰柡鍫墮濠€?
+// DoH/nginx 闁告瑯鍨甸崗姗€宕堕悩杈闁告娲ㄦ鍥Υ娴ｅ摜鈹涙繝褍鍟ㄩ埀顑跨劍閸ㄣ劍绂掓惔銏″紦闁告凹鍨版慨鈺呮嚀瀹€鈧杈ㄥ緞娓氬簱鍋撻崒婵堢闂佹彃鑻禒娑欑▔閵堝嫭顐藉ù婊冾儜缁?
+//   1) 婵☆偀鍋撻柡?5444(DoH 闁告挸绉堕悿? / 5454(DoH 闁告艾娴烽? / 443(nginx) 闁哄嫷鍨伴幆渚€鏌堥挊澶嬭含闁?
+//   2) 缂傚倽妗ㄩ幑銏ゅ箛韫囧海顏卞☉鎿冧簻濮樸劎鎹勯幋婊咁伇婵?sniroute.cmd up 闁硅泛锕ら悾鐘崇椤掍礁顎欓悹褔鏀卞?
+// 闁稿繈鍔戦崕瀵镐焊鏉堚晛宕曢柛姘閼村﹪骞撻幇顔轰粵闁挎稑鐭侀鈧柣顫妽閸╂盯鎯岄妷鈺€澹?鐎规瓕灏欑划锟犲礆閸パ勭闁哄牜鍓欏﹢?DNS 闁哄倽顫夐、?闁?
 void RestoreLocalDns() {
     CreateThread(nullptr, 0, [](LPVOID) -> DWORD {
         bool ok = PortListening(5444) && PortListening(5454) && PortListening(443);
@@ -717,8 +717,8 @@ void RestoreLocalDns() {
             CloseHandle(pi.hThread);
             Log(L"[dns] up exit " + std::to_wstring(upExit));
         }
-        // up 浼氬厛鍋?璧锋湇鍔″啀鍋氬仴搴锋鏌ワ紝绔彛涓嶆槸绔嬪埢鍏ㄩ儴灏辩华銆傝疆璇㈡渶澶?30 绉掞紱
-        // 浠嶄笉灏辩华灏卞啀璺戜竴娆?up锛堟湇鍔″彲鑳藉垰濂借涓婁竴娆￠噸鍚墦鏂級銆?
+        // up 濞村吋鑹鹃崢娑㈠磻?閻犙囨敱濠€鍥礉閳ュ啿鏅欓柛瀣壘娴犲瓨鎯旈柨瀣垫⒕闁哄被鍎荤槐婵堢博椤栨艾缍撳☉鎾崇У濡插摜绮╃€ｎ亜鐓濋柛蹇嬪姂閸庡浜告潏鈺佸磿闁靛棗鍊介悿鍡欐嫚閵忊剝浠樺?30 缂佸甯槐?
+        // 濞寸姴绉崇粭澶屼焊鏉堚晛宕曢悘蹇撳船閸熲偓閻犵儤鍨崇粩鏉戔枎?up闁挎稑鐗婂﹢鍥礉閳ュ啿璁查柤瀹犳閸ㄧ増绺介崐鐕佹蕉濞戞挸锕ｇ粩鏉戔枎閿熺姴娅㈤柛姘煎灡婢э箓寮銊х闁?
         auto allUp = [](int *miss) -> bool {
             bool a = PortListening(5444), b = PortListening(5454), c = PortListening(443);
             if (miss) *miss = a ? (b ? (c ? 0 : 443) : 5454) : 5444;
@@ -731,8 +731,8 @@ void RestoreLocalDns() {
             }
             return allUp(nullptr);
         };
-        // up 鐨勬甯哥粨鏉熷氨浠ｈ〃鏈嶅姟宸叉媺璧凤紱绔彛鎺㈡祴鍙敤鏉ュ厹搴曪紝涓嶈鍦ㄥ畠閲嶅惎
-        // 鏈嶅姟鐨勭獥鍙ｉ噷璇垽鎴?娌¤捣鏉?銆?
+        // up 闁汇劌瀚婊呮暜閸濄儳娉㈤柡澶屽枎濮樸劍绂掗敐鍫涒偓鍐嫉瀹ュ懎顫ょ€圭寮舵刊铏规導閸戙倗骞㈢紒鏃戝灠瑜版盯骞掗姀锛勩偞闁告瑯浜為弫銈夊级閵夈儱骞戦幖瀛樻穿缁辨繃绋夊鍫矗闁革负鍔岄悾鐘绘煂瀹ュ懏鍎?
+        // 闁哄牆绉存慨鐔兼儍閸曨厾宕堕柛娆欑秮閸ｉ鎷犻姘伈闁?婵炲眲銈嗗闯闁?闁?
         bool now = (started && upExit == 0);
         if (!now) now = waitUp(20);
         if (!now) {
@@ -762,10 +762,10 @@ void RestoreLocalDns() {
 }
 
 
-// WARP 鏄惁鐢辩敤鎴蜂富鍔ㄥ惎鐢ㄣ€傛爣璁版枃浠?data\.warp-enabled锛?
-//   瀛樺湪   -> 鐢ㄦ埛甯屾湜 WARP 寮€鐫€锛堥噸鍚悗淇濇寔锛?
-//   涓嶅瓨鍦?-> 榛樿鍏抽棴锛堜骇鍝侀粯璁ょ姸鎬侊紱鍚姩鏃惰嫢鍙戠幇 WARP 杩樿繛鐫€灏辨柇寮€锛?
-// 鐢ㄦ爣璁版枃浠惰€屼笉鏄 JSON锛屾槸涓轰簡鍜?.autostart-off 淇濇寔鍚屼竴绉嶅仛娉曘€?
+// WARP 闁哄嫷鍨伴幆渚€鎮芥潏鈺傛殢闁圭娓圭€靛矂宕濋妸銉﹀剻闁活潿鍔婇埀顒€鍊归悥锝囨媼閻楀牊鐎ù?data\.warp-enabled闁?
+//   閻庢稒锚濠€?  -> 闁活潿鍔嶉崺娑氭暜鐏炵偓绠?WARP 鐎殿喒鍋撻柣顐熷亾闁挎稑鐗撻崳鎼佸触椤栨碍鍊靛ǎ鍥ㄧ箖鐎垫棃鏁?
+//   濞戞挸绉撮悺銊╁捶?-> 濮掓稒顭堥濠氬礂閹惰姤锛旈柨娑樼墔妤犲洭宕笟鈧划顖滄媼閵堝洤笑闁诡兛绶ょ槐閬嶅触椤栨艾袟闁哄啯鍎肩€氥垽宕ｉ幋鐘茬疀 WARP 閺夆晜顭堢换娑㈡儓閳ь剛浜告潏銊︾劷鐎殿喒鍋撻柨?
+// 闁活潿鍔嶉悥锝囨媼閻楀牊鐎ù鐘冲劶閳ь剙濂旂粭澶愬及椤栨繍鍤?JSON闁挎稑鏈Σ鍛婄▔鏉炴壆鍟婇柛?.autostart-off 濞ｅ洦绻冪€垫棃宕ョ仦鑲╊伇缂佸绉存禒娑樷枖閺囨ǚ鍋?
 bool WarpIntentEnabled() {
     std::wstring marker = g_root + L"\\data\\.warp-enabled";
     return FileExists(marker);
@@ -782,8 +782,8 @@ void SetWarpIntent(bool enabled) {
     }
 }
 
-// 鍚姩鏃舵墽琛?榛樿鍏抽棴"锛氱敤鎴锋病鍚敤杩囥€佷絾 WARP 杩樿繛鐫€ -> 鏂紑銆?
-// 鍙湪鍚姩鏃跺仛涓€娆★紝涓嶆斁杩涘畾鏃跺櫒锛岄伩鍏嶅拰鐢ㄦ埛鎵嬪姩杩炴帴鎵撴灦銆?
+// 闁告凹鍨版慨鈺呭籍閼搁潧鈷旈悶?濮掓稒顭堥濠氬礂閹惰姤锛?闁挎稒姘ㄩ弫銈夊箣闁垮姊鹃柛姘煎灣閺併倖娼婚崶銉㈠亾娴ｉ绋?WARP 閺夆晜顭堢换娑㈡儓閳?-> 闁哄偆鍘肩槐鎴﹀Υ?
+// 闁告瑯浜滃﹢顏堝触椤栨艾袟闁哄啳娉涙禒娑欑▔閳ь剙鈻庨埥鍛濞戞挸绉甸弬浣规交濞戞鏆伴柡鍐硾濞呮帡鏁嶅畝鍕級闁稿繐绉撮幏浼存偨閵婏箑鐓曢柟闈涱儏婵晜娼婚悙鏉戝闁瑰灚鎸婚悘锕傚Υ?
 void EnforceWarpDefaultOff() {
     if (WarpIntentEnabled()) return;
     if (WarpState() != 1) return;
@@ -803,18 +803,18 @@ void EnforceWarpDefaultOff() {
     }
 }
 
-// ---------------------------------------------------------------- WARP 鍋ュ悍鍛婅
-// 涓ょ"WARP 涓嶈兘鐢?锛?
-//   1) 鐘舵€佷粠 connected 鍙樻垚 disconnected      -> 绔嬪埢閫氱煡
-//   2) 鐘舵€佽 connected 浣嗗嚭鍙ｆ帰娴嬩笉閫氾紙涓㈠寘楂?绔偣琚檺锛?
-//      -> 杩炵画澶辫触 2 娆℃墠閫氱煡锛屼笖 10 鍒嗛挓鍐呮渶澶氫竴娆★紝閬垮厤鍒峰睆
-// 鐢ㄦ埛涓诲姩鏂紑鏃?g_warpManualStop=true锛屼笉鎵撴壈銆?
+// ---------------------------------------------------------------- WARP 闁稿鍎遍幃宥夊川婵犲拋鍔?
+// 濞戞挶鍊楅～?WARP 濞戞挸绉烽崗姗€鎮?闁?
+//   1) 闁绘鍩栭埀顑挎缁?connected 闁告瑦蓱閸?disconnected      -> 缂佹柨顑呴崺銏ゆ焻濮樿京鍙€
+//   2) 闁绘鍩栭埀顑挎祰椤?connected 濞达絽妫楅崵顓㈠矗閿濆棗璧存繛鏉戭儎缁楀鏌呭鍓х濞戞挶鍨圭€垫ɑ顨?缂佹棏鍨抽崑锝囨偖椤愶附顎欓柨?
+//      -> 閺夆晝鍋熼悽缁樺緞鏉堫偉袝 2 婵炲棌鍓濇晶鐘绘焻濮樿京鍙€闁挎稑濂旂粭?10 闁告帒妫濋幐鎾诲礃閸涱喗浠樺鑸电煯缁旀潙鈻庨埥鍛闂侇剙鐏濋崢銈夊礆瀹勬壆娼?
+// 闁活潿鍔嶉崺娑欑▔鐠囨彃袟闁哄偆鍘肩槐鎴﹀籍?g_warpManualStop=true闁挎稑濂旂粭澶愬箥閹炬潙顥嶉柕?
 bool g_warpManualStop = false;
 int g_warpLastState = -1;
 int g_warpFailStreak = 0;
 ULONGLONG g_warpLastNotify = 0;
 
-// 閫氳繃 WARP 鍙栦竴涓?204 绔偣銆傝繑鍥?true 琛ㄧず鍑哄彛鍙敤銆?
+// 闂侇偅淇虹换?WARP 闁告瑦鐗旂粩瀛樼▔?204 缂佹棏鍨抽崑锝夊Υ閸屾繄绠查柛?true 閻炴稏鍔庨妵姘跺礄閸濆嫬缍撻柛娆樺灣閺併倝濡?
 bool WarpProbeOk() {
     std::wstring cmd =
         L"curl.exe -s --ssl-no-revoke -m 8 -o NUL -w %{http_code} "
@@ -849,11 +849,11 @@ bool WarpProbeOk() {
 void RunWarpHealthCheck() {
     CreateThread(nullptr, 0, [](LPVOID) -> DWORD {
         int st = WarpState();
-        if (st == 0) {                     // 娌¤瀹㈡埛绔紝浠€涔堥兘涓嶅仛
+        if (st == 0) {                     // 婵炲眲銈庢閻庡箍鍨洪崺娑氱博椤栥倗绀夊ù鐘亾濞戞柨鐗撻崗妯荤▔瀹ュ懍绮?
             g_warpLastState = 0;
             return 0;
         }
-        if (st != 1) {                     // 鏂紑
+        if (st != 1) {                     // 闁哄偆鍘肩槐?
             if (g_warpLastState == 1 && !g_warpManualStop && WarpIntentEnabled()) {
                 Log(L"[warp] alert: disconnected");
                 PostMessageW(g_hwnd, WM_WARP_ALERT, 1, 0);
@@ -882,7 +882,7 @@ void RunWarpHealthCheck() {
 }
 
 // ---------------------------------------------------------------- status rows
-constexpr wchar_t kAppVersion[] = L"3.13.1";
+constexpr wchar_t kAppVersion[] = L"3.13.3";
 
 // NRPT rule installed? Same key the installer writes, so status cannot lie.
 bool NrptInstalled() {
@@ -999,7 +999,7 @@ std::vector<SiteEntry> LoadSites() {
         e.url = line.substr(bar + 1);
         if (!e.label.empty() && !e.url.empty()) out.push_back(e);
     }
-    // 鑿滃崟鎸夐瀛楁瘝鎺掑簭锛氭暟鎹枃浠跺彲鑳芥潵鑷棫鐗堟湰锛堟湭鎺掑簭锛夛紝杩欓噷鍐嶄繚璇佷竴娆°€?
+    // 闁兼寧绮屽畷鐔煎箰婢舵劦娴曢悗娑欘殕閻︽繈骞掗幒鎴犵闁挎稒纰嶉弳鐔煎箲椤旇姤鐎ù鐘烘硾瑜版煡鎳楅懞銉﹂檷闁煎浜濆Λ顐︽偋閸喐鎷遍柨娑樼墛濠€顓㈠箳閹烘垹纰嶉柨娑橆檧缁辨繃娼诲▎鎾虫闁告劕绉崇换姘辨嫚娴ｉ顏辨繛鍠℃壋鍋?
     std::sort(out.begin(), out.end(), [](const SiteEntry& a, const SiteEntry& b) {
         std::wstring x = a.label, y = b.label;
         for (auto& ch : x) ch = (wchar_t)towlower(ch);
@@ -1088,7 +1088,7 @@ void ShowMenu() {
     AppendMenuW(menu, MF_STRING, IDM_UPDATE, g_str.get(L"menu_update", L"Check for updates"));
     AppendMenuW(menu, MF_STRING, IDM_NAT, g_str.get(L"menu_nat", L"NAT type check"));
     {
-        // WARP 瀛愯彍鍗曪細缁?Sniroute 鍔犱竴鏉″澶栧嚭鍙ｏ紙Google/YouTube/Play 缃戦〉鐗堬級銆?
+        // WARP 閻庢稒鍔樿ぐ宥夊础閺囶亞绐楃紓?Sniroute 闁告梻濮崇粩鎾级閳ユ剚鏆板鑸电墪閸ゎ參宕ｉ敐蹇曠Google/YouTube/Play 缂傚啯鍨块妴澶愭偋閸剛绀嗛柕?
         int ws = WarpState();
         HMENU warpMenu = CreatePopupMenu();
         if (ws == 0) {
@@ -1129,11 +1129,11 @@ void ShowMenu() {
     AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
     AppendMenuW(menu, MF_STRING, IDM_EXIT, g_str.get(L"menu_exit", L"Exit"));
 
-    // 鏈€搴曢儴鐨勭増鏉冭锛氱伆鑹蹭笉鍙偣锛屽彧鐢ㄦ潵鏍囨槑鍑哄鍜岀増鏈€?
-    // 婧愮爜淇濇寔绾?ASCII锛屾墍浠?U+00A9(漏) 鍜?U+00B7(路) 鐢ㄨ浆涔夊啓銆?
+    // 闁哄牃鍋撻幖瀛樻礋閸庢挳鎯冮崟顓烆暭闁哄鍟抽、鎴︽晬濮樺彉绱楅柤纭呭紦缁楀宕ｉ婊冧化闁挎稑鑻ぐ褔鎮介妸锔介檷闁哄秴娲﹀Σ鎴﹀礄閸濆嫷妲遍柛婊冪灱婢ф寮甸閿亾?
+    // 婵犙勫姉閻栨粍绌卞┑鍥х槷缂?ASCII闁挎稑鏈晶宥嗙?U+00A9(濠? 闁?U+00B7(鐠? 闁活潿鍔忓ù鍡樼▕婢跺﹤鏅搁柕?
     {
-        // 鐗堟潈 + 璁稿彲鍒嗗紑涓よ锛氫竴琛屽お闀夸細琚彍鍗曟埅鏂紝鑰屼笖"All rights reserved"
-        // 鍗曠嫭鎴愯涓嶅鏄撹璇鎴?杩欎釜椤圭洰涓嶆槸寮€婧愮殑"銆?
+        // 闁绘鐗婂?+ 閻犱胶顭堣ぐ鏌ュ礆閸℃纾诲☉鎾卞€涢、鎴︽晬濮橆偆顏遍悶娑樿嫰閵囧﹪姊规径鍝ョ獥閻炴凹鍋夎ぐ宥夊础閺囩喎鐒婚柡鍌ゅ弿缁辨繈鎳撶仦鑲╃懍"All rights reserved"
+        // 闁告娲滅€氼參骞嬮幇顖ｆ斀濞戞挸绉撮鎰板及閹捐娼堕悹鍥跺灥椤曚即骞?閺夆晜鐟ら柌婊勩亜閸︻厽绐楀☉鎾崇У濡茬顕ｉ埀顒€鈹冮幇顔界暠"闁?
         AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
         AppendMenuW(menu, MF_STRING | MF_GRAYED, 0,
                     L"Copyright \u00A9 2026 Kynarain. All rights reserved.");
@@ -1253,7 +1253,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             RunNatProbe();
             return 0;
         case IDM_WARP_EXPORT: {
-            // 瀵煎嚭涓嶄緷璧栧鎴风锛欳LI 浼氳嚜宸辨敞鍐?WARP 璐﹀彿骞跺啓 YAML銆?
+            // 閻庣數鍘ч崵顓熺▔瀹ュ嫮璐╅悹褎鐗曢褰掑箣妞嬪寒浼傞柨娑欘儙LI 濞村吋淇洪崵婊冾啅鏉堛劍鏆堥柛?WARP 閻犳劧绠戣ぐ鍧楃嵁鐠哄搫鏅?YAML闁?
             std::wstring cmd = L"cmd.exe /c \"\"" + g_cliPath + L"\" warp export\"";
             STARTUPINFOW si{};
             si.cb = sizeof(si);
@@ -1302,8 +1302,8 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         break;
 
     case WM_WARP_INSTALL_DONE: {
-        // winget 瀵?宸插畨瑁呬笖鏃犳洿鏂?杩斿洖闈?0锛?1978335189锛夛紝閭ｄ笉鏄け璐ャ€?
-        // 浠ュ鎴风鏄惁鐪熺殑鍑虹幇涓哄噯锛岃€屼笉鏄彧鐪嬮€€鍑虹爜銆?
+        // winget 閻?鐎瑰憡褰冮悾銊ф啑閸涱剛鐟柡鍐У濞插潡寮?閺夆晜鏌ㄥú鏍?0闁?1978335189闁挎稑顧€缁辨繈鏌囬敐鍕憹闁哄嫷鍨伴妵鎴犳嫻閵夛絺鍋?
+        // 濞寸姰鍎遍褰掑箣妞嬪寒浼傞柡鍕靛灠閹線鎯囬悢鐑樼暠闁告垼娅ｉ獮鍥ㄧ▔閸濆嫬娅欓柨娑樼焷閳ь剙濂旂粭澶愬及椤栨艾娑ч柣顏勵儔閳ь兘鍋撻柛鎴ｆ閻栨粓濡?
         if (wp == 0 && WarpState() != 0) wp = 0;
         if (wp == 0) {
             Balloon(g_str.get(L"tip", L"sniroute"),
@@ -1334,7 +1334,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                     g_str.get(L"warp_lost_msg",
                               L"WARP is no longer connected; switching back to the local DNS plan."),
                     NIIF_WARNING);
-            // 鏂紑涓嶅彧鏄?鍑哄彛娌′簡"锛氶『鎵嬬‘淇濇湰鍦?DoH/nginx 杩樺湪锛屽埆璁╃敤鎴蜂互涓烘柇缃戙€?
+            // 闁哄偆鍘肩槐鎴炵▔瀹ュ懎娑ч柡?闁告垵鎼ぐ娑樷柦閳ヨ尙鍟?闁挎稒宀搁妴搴ㄥ箥鐎ｎ兘鈧ɑ绌卞┑鍥ㄦ嫳闁?DoH/nginx 閺夆晜锚濠€顏堟晬鐏炶棄鐒奸悹浣叉櫇閺併倝骞嬮摎鍌欑鞍濞戞挾鍎ら弻鍥╃磾閹存瑢鍋?
             RestoreLocalDns();
         } else if (wp == 3) {
             Balloon(g_str.get(L"tip", L"sniroute"),
@@ -1421,8 +1421,8 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
 }
 
 
-// 妫€鏌ユ洿鏂帮細璺?sniroute.cmd update check锛屾妸杈撳嚭璐村埌姘旀场閲屻€?
-// 闇€瑕佽闂?GitHub API锛堢鏈変粨搴撹璁よ瘉锛夛紝鎵€浠ユ斁鍚庡彴绾跨▼锛屼笉鑳藉崱浣忔墭鐩樸€?
+// 婵☆偀鍋撻柡灞诲劜濞插潡寮敮顔剧獥閻?sniroute.cmd update check闁挎稑鏈俊鍛婃綇閹惧啿姣夐悹鎰綑閸╁苯顫濋弮鈧崷娲煂鐏炵儵鍋?
+// 闂傚洠鍋撻悷鏇氭祰椤旀牠姊?GitHub API闁挎稑鐗忛～鍡涘嫉婢跺娉㈤幖瀛樻崄椤╋妇鎷嬮妶鍫㈡闁挎稑顧€缁辨繈骞嶉埀顒佺閵夛附鏉归柛姘瑜板鐥捄銊㈡煠闁挎稑濂旂粭澶愭嚄閽樺骞㈠ù锝呯箲婢ь參鎯勫Ο绯曞亾?
 void RunUpdateCheck() {
     Balloon(g_str.get(L"tip", L"sniroute"),
             g_str.get(L"update_checking", L"Checking for updates..."), NIIF_INFO);
@@ -1470,7 +1470,7 @@ void RunUpdateCheck() {
                 MultiByteToWideChar(CP_UTF8, 0, raw.data(), (int)raw.size(), text.data(), need);
             }
         }
-        // 姘旀场鏀句笉涓嬪琛岋細鍙繚鐣欏墠涓よ鏈夋晥鍐呭銆?
+        // 婵ɑ姊归崷娲绩閸欍儳鐟濆☉鎾愁儏椤﹁法鎮板畝瀣獥闁告瑯浜欑换姘舵偩濞嗗繐顤呭☉鎾卞€涢、鎴﹀嫉婢跺娅忛柛鎰噹椤旀劙濡?
         std::wstring brief;
         int lines = 0;
         size_t pos = 0;
@@ -1605,15 +1605,15 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, LPWSTR, int) {
     // Upstream addresses drift as the CDN reshuffles its fleet, so re-check them
     // every 45 minutes in the background instead of waiting for a user report.
     SetTimer(g_hwnd, TIMER_REFRESH, 45 * 60 * 1000, nullptr);
-    // WARP 鍋ュ悍妫€鏌ワ細60 绉掍竴娆★紝澶辫触涓ゆ鎵嶉€氱煡銆?
-    // 鍚姩鏃跺厛鎶婂綋鍓嶇姸鎬佽涓嬫潵锛氬惁鍒?鍚姩鏃跺凡杩炴帴銆侀殢鍚庢柇寮€"杩欑杞崲浼氳婕忔帀
-    // 锛堢涓€娆℃鏌ョ湅鍒扮殑鏄柇寮€锛岃€屼笂涓€娆＄姸鎬佽繕鏄湭鐭ワ紝鍒ゅ畾涓嶅嚭"浠庤繛鎺ュ埌鏂紑"锛夈€?
-    // 姣忔鍚姩閮借ˉ璺戜竴娆?up锛屼絾**寤惰繜 12 绉?*锛?
-    // first-run-setup 鑷繁涔熶細鎷夎捣鏈嶅姟锛岀珛鍒诲啀璺?up 浼氬拰瀹冩姠锛堝疄娴嬪悗绔浜掔浉
-    // 鍋滄帀锛岀粨鏋?5454 娌′汉鍚€?444 杩斿洖 502锛夈€傜瓑瀹冪粨鏉熷悗鍐嶈ˉ涓€娆″氨绋冲畾浜嗐€?
+    // WARP 闁稿鍎遍幃宥呂涢埀顒勫蓟閵夘垳绐?0 缂佸甯婄粩鏉戔枎閳藉懐绀夊鎯扮簿鐟欙附绋夐妶鍡╁仹闁归潧绉归埀顒佹皑閻擄繝濡?
+    // 闁告凹鍨版慨鈺呭籍鐠哄搫甯ラ柟璺猴工缂嶅宕滃鍥﹂柟顑挎祰椤斿洦绋夌€ｎ偅闄嶉柨娑欒壘閹線宕?闁告凹鍨版慨鈺呭籍鐠哄搫鍤掗弶鈺冨仦鐢挳濡存笟鈧▓銏ゅ触鎼淬垺鐒界€殿喒鍋?閺夆晜鐟ч～鎺撴姜椤掍礁搴婂ù鍏间亢椤箑顭宠箛鏂跨
+    // 闁挎稑鐗忛鍥ㄧ▔閳ь剙鈻庨埄鍐炬⒕闁哄被鍎冲﹢鍛村礆閹殿喗鐣遍柡鍕靛灡閺屽洤顕ｉ埀顒勬晬瀹€鍐ｅ亾鐏炶偐鐟愬☉鎾亾婵炲棴绱曟慨鎼佸箑娴ｇ晫绠烽柡鍕靛灡濠€顓㈡儗閵夘垳绀夐柛鎺嬪€曢悾鐐▔瀹ュ懎姣?濞寸姴姘︾换娑㈠箳閵夈儱鐓傞柡鍌ゅ幖缁?闁挎稑顦埀?
+    // 婵絽绻戦濂稿触椤栨艾袟闂侇喖鈧啎澶屾崉閹存粎顏辨繛?up闁挎稑濂旂徊?*鐎点倖鍎肩换?12 缂?*闁?
+    // first-run-setup 闁煎浜滅换浣圭▕閻斿墎绐楅柟宄邦槼閹癸綁寮靛鍛潳闁挎稑鐬奸悵娑㈠礆鐠囨彃鏅欓悹?up 濞村吋鑹鹃幏鎵偓鐟板暞婵娀鏁嶉崼婵堟澖婵炴潙顑呴幃妤冪博椤栨繍娼跺ù婊勫笧濞?
+    // 闁稿绮嶇敮鈧柨娑樼灱缁劑寮?5454 婵炲备鈧弶鐪介柛姘煎厵閳?444 閺夆晜鏌ㄥú?502闁挎稑顦埀顒€鍊婚悺鎴犫偓鐟板暟缁劑寮堕悢閿嬪€甸柛鎰Х钘熷☉鎾亾婵炲棌鈧櫕鐨戠紒瀣暱閻ｇ偓绂嶉崱鎰ㄥ亾?
     SetTimer(g_hwnd, TIMER_STARTUP_UP, 12000, nullptr);
 
-    // WARP 榛樿鍏抽棴锛氱敤鎴锋病涓诲姩鍚敤杩囧氨鎶婅繛鐫€鐨?WARP 鏂帀锛屽啀璁扮姸鎬併€?
+    // WARP 濮掓稒顭堥濠氬礂閹惰姤锛旈柨娑欐皑閺併倝骞嬮柨瀣⒕濞戞捁顕ф慨鈺呭触椤栨粍鏆忛弶鈺佹搐濮樸劑骞庢繝鍛闁活偀鍋撻柣?WARP 闁哄偆鍘界敮鈧柨娑樿嫰閸熲偓閻犱焦澹嗘慨鎼佸箑娴ｇ鍋?
     EnforceWarpDefaultOff();
     g_warpLastState = WarpState();
     SetTimer(g_hwnd, TIMER_WARP, 60 * 1000, nullptr);
