@@ -23,6 +23,7 @@
 #include <ws2tcpip.h>
 #include <windows.h>
 #include <shellapi.h>
+#include <shlobj.h>
 #include <string>
 #include <algorithm>
 #include <vector>
@@ -62,6 +63,8 @@ constexpr UINT IDM_WARP_OFF = 1017;     // disconnect Cloudflare WARP
 constexpr UINT IDM_WARP_INSTALL = 1018; // one-click winget install
 constexpr UINT IDM_WARP_EXPORT = 1019;  // export Clash YAML
 constexpr UINT IDM_UPDATE = 1020;       // check for updates
+constexpr UINT IDM_GHA_FETCH = 1021;    // download via GitHub Actions
+constexpr UINT WM_GHA_DONE = WM_APP + 24;
 constexpr UINT WM_UPDATE_DONE = WM_APP + 23;
 constexpr UINT WM_WARP_INSTALL_DONE = WM_APP + 22;
 constexpr UINT IDM_REVERT = 1006;
@@ -882,7 +885,7 @@ void RunWarpHealthCheck() {
 }
 
 // ---------------------------------------------------------------- status rows
-constexpr wchar_t kAppVersion[] = L"3.13.3";
+constexpr wchar_t kAppVersion[] = L"3.14.1";
 
 // NRPT rule installed? Same key the installer writes, so status cannot lie.
 bool NrptInstalled() {
@@ -1087,6 +1090,8 @@ void ShowMenu() {
     AppendMenuW(menu, MF_STRING, IDM_STATUS, g_str.get(L"menu_status", L"Status"));
     AppendMenuW(menu, MF_STRING, IDM_UPDATE, g_str.get(L"menu_update", L"Check for updates"));
     AppendMenuW(menu, MF_STRING, IDM_NAT, g_str.get(L"menu_nat", L"NAT type check"));
+    AppendMenuW(menu, MF_STRING, IDM_GHA_FETCH,
+                g_str.get(L"menu_gha", L"Download via GitHub Actions..."));
     {
         // WARP 閻庢稒鍔樿ぐ宥夊础閺囶亞绐楃紓?Sniroute 闁告梻濮崇粩鎾级閳ユ剚鏆板鑸电墪閸ゎ參宕ｉ敐蹇曠Google/YouTube/Play 缂傚啯鍨块妴澶愭偋閸剛绀嗛柕?
         int ws = WarpState();
@@ -1151,6 +1156,9 @@ void ShowMenu() {
 
 // ---------------------------------------------------------------- window proc
 void RunUpdateCheck();   // defined later in this namespace
+
+std::wstring PromptForUrl();          // defined later in this namespace
+void RunGhaFetch(const std::wstring& url);
 
 LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     if (msg == g_taskbarCreated && g_taskbarCreated != 0) {
@@ -1246,6 +1254,11 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                        L"Upstream addresses refreshed", L"Refresh failed (%d)",
                        nullptr});
             return 0;
+        case IDM_GHA_FETCH: {
+            std::wstring url = PromptForUrl();
+            if (!url.empty()) RunGhaFetch(url);
+            return 0;
+        }
         case IDM_UPDATE:
             RunUpdateCheck();
             return 0;
@@ -1315,6 +1328,15 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                     g_str.get(L"warp_install_fail",
                               L"WARP install failed. Run manually: winget install Cloudflare.Warp"),
                     NIIF_WARNING);
+        }
+        return 0;
+    }
+
+    case WM_GHA_DONE: {
+        std::wstring* p = reinterpret_cast<std::wstring*>(lp);
+        if (p) {
+            Balloon(g_str.get(L"tip", L"sniroute"), *p, NIIF_INFO);
+            delete p;
         }
         return 0;
     }
@@ -1491,6 +1513,162 @@ void RunUpdateCheck() {
         PostMessageW(g_hwnd, WM_UPDATE_DONE, 0, (LPARAM)new std::wstring(brief));
         return 0;
     }, nullptr, 0, nullptr);
+}
+
+
+// ---------------------------------------------------------------- GHA 下载对话框
+// 极简输入框：编辑框 + 确定/取消，纯代码创建（不需要 .rc 资源）。
+// Enter = 确定，Esc = 取消。
+static std::wstring g_promptValue;
+static bool g_promptDone = false;
+
+LRESULT CALLBACK PromptProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
+    static HWND edit = nullptr;
+    switch (msg) {
+    case WM_CREATE: {
+        CreateWindowExW(0, L"STATIC", L"URL (https://...)",
+                        WS_CHILD | WS_VISIBLE, 14, 10, 512, 20, hwnd, nullptr, nullptr, nullptr);
+        CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", L"",
+                        WS_CHILD | WS_VISIBLE | WS_TABSTOP | ES_AUTOHSCROLL,
+                        14, 34, 512, 26, hwnd, (HMENU)1001, nullptr, nullptr);
+        edit = GetDlgItem(hwnd, 1001);
+        SetFocus(edit);
+        CreateWindowExW(0, L"BUTTON", L"OK", WS_CHILD | WS_VISIBLE | BS_DEFPUSHBUTTON,
+                        350, 70, 80, 28, hwnd, (HMENU)IDOK, nullptr, nullptr);
+        CreateWindowExW(0, L"BUTTON", L"Cancel", WS_CHILD | WS_VISIBLE,
+                        440, 70, 86, 28, hwnd, (HMENU)IDCANCEL, nullptr, nullptr);
+        return 0;
+    }
+    case WM_COMMAND:
+        if (LOWORD(wp) == IDOK) {
+            wchar_t buf[2048]{};
+            GetWindowTextW(edit, buf, 2048);
+            g_promptValue = buf;
+            g_promptDone = true;
+            DestroyWindow(hwnd);
+            return 0;
+        }
+        if (LOWORD(wp) == IDCANCEL) {
+            g_promptDone = true;
+            DestroyWindow(hwnd);
+            return 0;
+        }
+        break;
+    case WM_KEYDOWN:
+        if (wp == VK_RETURN) { PostMessageW(hwnd, WM_COMMAND, IDOK, 0); return 0; }
+        if (wp == VK_ESCAPE) { PostMessageW(hwnd, WM_COMMAND, IDCANCEL, 0); return 0; }
+        break;
+    case WM_CLOSE:
+        g_promptDone = true;
+        DestroyWindow(hwnd);
+        return 0;
+    }
+    return DefWindowProcW(hwnd, msg, wp, lp);
+}
+
+std::wstring PromptForUrl() {
+    static bool registered = false;
+    HINSTANCE inst = GetModuleHandleW(nullptr);
+    if (!registered) {
+        WNDCLASSW wc{};
+        wc.lpfnWndProc = PromptProc;
+        wc.hInstance = inst;
+        wc.lpszClassName = L"SniroutePrompt";
+        wc.hCursor = LoadCursorW(nullptr, IDC_ARROW);
+        wc.hbrBackground = (HBRUSH)(COLOR_BTNFACE + 1);
+        RegisterClassW(&wc);
+        registered = true;
+    }
+    g_promptValue.clear();
+    g_promptDone = false;
+    HWND w = CreateWindowExW(WS_EX_TOPMOST | WS_EX_DLGMODALFRAME, L"SniroutePrompt",
+                             L"Download via GitHub Actions",
+                             WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU,
+                             CW_USEDEFAULT, CW_USEDEFAULT, 560, 140,
+                             nullptr, nullptr, inst, nullptr);
+    if (!w) return L"";
+    ShowWindow(w, SW_SHOW);
+    SetForegroundWindow(w);
+    MSG msg;
+    while (!g_promptDone && GetMessageW(&msg, nullptr, 0, 0) > 0) {
+        if (!IsDialogMessageW(w, &msg)) {
+            TranslateMessage(&msg);
+            DispatchMessageW(&msg);
+        }
+    }
+    return g_promptValue;
+}
+
+// 后台跑 gha fetch，把最后一行输出贴到气泡。
+void RunGhaFetch(const std::wstring& url) {
+    Balloon(g_str.get(L"tip", L"sniroute"),
+            g_str.get(L"gha_started", L"Downloading via GitHub Actions..."), NIIF_INFO);
+    CreateThread(nullptr, 0, [](LPVOID param) -> DWORD {
+        std::wstring* p = reinterpret_cast<std::wstring*>(param);
+        std::wstring target = *p;
+        delete p;
+
+        wchar_t profile[MAX_PATH]{};
+        SHGetFolderPathW(nullptr, CSIDL_PROFILE, nullptr, 0, profile);
+        std::wstring outDir = std::wstring(profile) + L"\\Downloads";
+        std::wstring cmdline = L"cmd.exe /c \"\"" + g_cliPath + L"\" gha fetch \"" +
+                               target + L"\" -o \"" + outDir + L"\" 2>&1\"";
+
+        SECURITY_ATTRIBUTES sa{sizeof(sa), nullptr, TRUE};
+        HANDLE readEnd = nullptr, writeEnd = nullptr;
+        if (!CreatePipe(&readEnd, &writeEnd, &sa, 0)) {
+            PostMessageW(g_hwnd, WM_GHA_DONE, 0, (LPARAM)new std::wstring(L"pipe failed"));
+            return 1;
+        }
+        SetHandleInformation(readEnd, HANDLE_FLAG_INHERIT, 0);
+        STARTUPINFOW si{};
+        si.cb = sizeof(si);
+        si.dwFlags = STARTF_USESTDHANDLES | STARTF_USESHOWWINDOW;
+        si.wShowWindow = SW_HIDE;
+        si.hStdOutput = writeEnd;
+        si.hStdError = writeEnd;
+        PROCESS_INFORMATION pi{};
+        std::wstring wcmd = cmdline;
+        BOOL started = CreateProcessW(nullptr, wcmd.data(), nullptr, nullptr, TRUE,
+                                      CREATE_NO_WINDOW, nullptr, g_root.c_str(), &si, &pi);
+        CloseHandle(writeEnd);
+        if (!started) {
+            CloseHandle(readEnd);
+            PostMessageW(g_hwnd, WM_GHA_DONE, 0, (LPARAM)new std::wstring(L"CreateProcess failed"));
+            return 1;
+        }
+        std::string raw;
+        char buf[1024];
+        DWORD got = 0;
+        while (ReadFile(readEnd, buf, sizeof(buf), &got, nullptr) && got > 0) raw.append(buf, got);
+        CloseHandle(readEnd);
+        WaitForSingleObject(pi.hProcess, 15 * 60 * 1000);
+        CloseHandle(pi.hProcess);
+        CloseHandle(pi.hThread);
+
+        std::wstring text;
+        if (!raw.empty()) {
+            int need = MultiByteToWideChar(CP_UTF8, 0, raw.data(), (int)raw.size(), nullptr, 0);
+            if (need > 0) {
+                text.resize((size_t)need);
+                MultiByteToWideChar(CP_UTF8, 0, raw.data(), (int)raw.size(), text.data(), need);
+            }
+        }
+        std::wstring brief;
+        size_t pos = 0;
+        while (pos < text.size()) {
+            size_t nl = text.find(L'\n', pos);
+            std::wstring one = text.substr(pos, nl == std::wstring::npos ? std::wstring::npos : nl - pos);
+            while (!one.empty() && (one.back() == L'\r' || one.back() == L' ')) one.pop_back();
+            if (!one.empty()) brief = one;
+            if (nl == std::wstring::npos) break;
+            pos = nl + 1;
+        }
+        if (brief.empty()) brief = L"GitHub Actions download failed";
+        Log(L"[gha] " + brief);
+        PostMessageW(g_hwnd, WM_GHA_DONE, 0, (LPARAM)new std::wstring(brief));
+        return 0;
+    }, new std::wstring(url), 0, nullptr);
 }
 
 bool CommandLineHas(const wchar_t* flag) {

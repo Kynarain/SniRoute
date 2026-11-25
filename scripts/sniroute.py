@@ -1591,8 +1591,16 @@ def cmd_gha(args) -> None:
         got = _gha_download(run["id"], tmp)
         if not got:
             die("没有拿到 artifact")
-        out = Path(args.output) if args.output else (Path.cwd() / got.name)
-        _sh.copyfileobj(open(got, "rb"), open(out, "wb")) if False else _sh.copy2(got, out)
+        # -o 的语义：指向已存在的目录（或以斜杠结尾）就放进去，否则当作文件名。
+        # 托盘传的是 <Downloads> 目录，这样文件名仍然是 artifact 自己的名字。
+        if args.output:
+            out = Path(args.output)
+            if out.is_dir() or str(args.output).endswith(("\\", "/")):
+                out = out / got.name
+        else:
+            out = Path.cwd() / got.name
+        out.parent.mkdir(parents=True, exist_ok=True)
+        _sh.copy2(got, out)
         print(f"已保存 {out}  （{out.stat().st_size} 字节）")
         print(f"  run id {run['id']}，源 {args.url}")
         return

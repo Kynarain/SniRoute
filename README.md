@@ -1661,6 +1661,25 @@ sniroute.cmd gha config --repo <owner/name>
 但凭据仍在本地 keyring。所以判断顺序是：先 `gh auth status`，失败再 `gh auth token`
 （纯本地）——不会把"网络不通"误报成"没登录"。
 
+
+### 托盘里填 URL 直接下载（3.14.0）
+
+右键托盘 → **Download via GitHub Actions...** → 粘贴 URL → 回车。
+
+- 输入框 Enter = 确定，Esc = 取消
+- 后台线程执行 `sniroute.cmd gha fetch <url> -o <Downloads>`，不卡托盘
+- 完成后气泡显示最后一行输出（保存路径 / 失败原因）
+- 文件落在 `%USERPROFILE%\Downloads\<URL 的文件名>`
+
+命令行等价：
+
+```powershell
+sniroute.cmd gha fetch <url> -o "$env:USERPROFILE\Downloads"
+```
+
+`-o` 指向已存在的目录（或以斜杠结尾）时按目录处理，文件名保持 artifact 自己的名字；
+否则当作完整的文件路径。
+
 ## 关于哈希文件（3.10.5 起）
 
 不再随产物生成 `.sha256` / `.sha1` / `.md5` 与 `SHA256SUMS.txt` / `SHA1SUMS.txt` / `MD5SUMS.txt`。
