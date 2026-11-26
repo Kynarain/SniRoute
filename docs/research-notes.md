@@ -225,3 +225,52 @@ www.pixiv.net src=80 -> 成功 2/2
 从黑名单里抽样测试时，先确认"该 IP 会不会回 QUIC"——否则超时会把
 "服务器不支持 h3"误判成"被墙"。本机实测里 `*.b-cdn.net` 就是这种：
 TCP 可达、QUIC 超时，但它们的 HTTPS 记录里根本没有 h3。
+
+---
+
+## 附：实现 sni-slicing 时踩的坑（QUIC 包构造）
+
+我们按论文思路实现了 Initial 分片（`tools/quic-slicing.py`），
+过程中踩了两个真实错误，记录一下：
+
+**1. AEAD 的 AAD 忘了传**
+
+QUIC Initial 的加密是 `AES-GCM(key, nonce, payload, aad=header)`，
+AAD 是"从首字节到包号末尾"的**完整头部**。传 `None` 时服务端会静默丢弃，
+现象是"服务端收到了字节但不开会话"。修正后与 aioquic 生成的包**逐字节一致**。
+
+**2. 初始密钥的 PRK 算错**
+
+`cryptography` 的 `HKDF(...).derive()` 返回的是 **Extract+Expand 的结果**，
+不是 RFC 8446 的 HKDF-Extract（= `HMAC(salt, ikm)`）。QUIC 要的是后者，
+再用 Expand-Label 派生 key/iv/hp。用错会得到完全不同的密钥。
+修正后用 RFC 9001 附录 A 的官方向量校验通过：
+
+```
+client key = 1f369613dd76d5467730efcbe3b1a22d   (与 RFC 一致)
+client iv  = fa044b2f42a3fd3b46fb255c           (与 RFC 一致)
+```
+
+**3. 真实目标上的结果（负）**
+
+对 `www.twitter.com`（69.171.235.22）和 `www.facebook.com`（157.240.7.20）：
+
+| 方式 | 结果 |
+|---|---|
+| 完整 QUIC 客户端（aioquic） | 超时 |
+| 整包（自建） | 超时 |
+| 分片（sni-slicing） | 超时 |
+
+两者都无回包，说明**不能用"超时"归因于 SNI 黑名单**——目标 IP 的 UDP 通路
+可能本身就不通，分片解决不了这一层。
+
+**4. WARP MASQUE 在本机不可用**
+
+`warp-cli tunnel protocol set MASQUE` + `connect` 的实测：
+
+```
+Connecting -> Performing connectivity checks -> Unable
+Reason: Connectivity check failed due to DNS Lookup Failed
+```
+
+已恢复成 WireGuard + 断开（默认关闭）。
