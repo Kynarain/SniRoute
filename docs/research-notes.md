@@ -274,3 +274,47 @@ Reason: Connectivity check failed due to DNS Lookup Failed
 ```
 
 已恢复成 WireGuard + 断开（默认关闭）。
+
+---
+
+## 附：Tor（Snowflake）稳定性实测
+
+用 `tools/tor-stability.py` 采样。结论：**连接能建立、短时探测稳定，但不适合浏览。**
+
+### 连接生命周期
+
+| 场景 | 现象 |
+|---|---|
+| 冷启动（重启 Tor Browser） | 约 10~20 秒建立 Snowflake 电路 |
+| 连续使用 3 分钟 | **100% 成功**（11/11 采样） |
+| 空闲 20 小时后 | **完全不出网**（30 秒超时），需要重启 Tor Browser |
+
+### 短时探测（check.torproject.org）
+
+```
+样本 11  成功 11  成功率 100%
+延迟 中位数 6.28s  最大 12.74s
+出口 IP: 204.8.96.156 / 204.8.96.88（会变）
+```
+
+### 真实页面加载
+
+| 目标 | 结果 | 耗时 |
+|---|---|---|
+| www.google.com | 200 | 60.1s |
+| www.x.com | 301 | 18.2s |
+| www.pixiv.net | **403** | 55.8s（Cloudflare 拒绝 Tor 出口） |
+
+### 吞吐
+
+```
+500 KB -> 49.3 秒 ≈ 10 KB/s
+（前一次测得 105 KB/s；Snowflake 的质量波动很大）
+```
+
+### 判断
+
+- **适合**：查文字资料、应急打开一两个页面
+- **不适合**：视频、大文件、日常浏览；也不适合当常驻通道（空闲会死）
+- 每次用之前先跑 `python tools/tor-stability.py --duration 60` 确认还活着
+
