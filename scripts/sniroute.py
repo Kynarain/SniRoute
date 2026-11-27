@@ -2232,6 +2232,27 @@ def describe(site: dict, result: dict, timeout: float, fetch=None) -> tuple:
     return label, detail
 
 
+
+def fetch_with_retry(fetch, host: str, path: str, timeout: float,
+                     attempts: int = 3, delay: float = 1.0) -> dict:
+    """对一次判定做重试。
+
+    为什么需要：Steam/Akamai 的地址存在"概率性丢包"——同一个 IP 一次成功、
+    四次超时。单次失败就报红会把正常站点误判成故障，重试能显著降低误报。
+    """
+    last = {}
+    for i in range(max(1, attempts)):
+        last = fetch(host, path, timeout)
+        if last.get("ok") and 200 <= last.get("code", 0) < 400:
+            return last
+        # 4xx 是确定性结论（被拒/不存在），重试只会白等——只有连接失败或 5xx 值得再试
+        if last.get("ok") and 400 <= last.get("code", 0) < 500:
+            return last
+        if i + 1 < attempts:
+            time.sleep(delay)
+    return last
+
+
 def cmd_verify(args) -> None:
     pid_file = ROOT / "logs" / "nginx.pid"
     if not pid_is_running(pid_file):
@@ -2244,8 +2265,8 @@ def cmd_verify(args) -> None:
     if not sites:
         die("没有可验证的站点。")
 
-    rows = []
     skipped = []
+    jobs = []
     for site in sites:
         hosts = site.get("hosts") or []
         probe = site.get("probe") or {}
@@ -2258,10 +2279,25 @@ def cmd_verify(args) -> None:
         # 只有 loopback 类（本机终结 TLS）才该验本机 443。
         # dns / ech 模式的浏览器都直连真实地址，用本机代理去验只会撞默认证书。
         mode = site.get("dns_mode") or ""
-        fetch = http_via_proxy if mode.startswith("loopback") else http_direct
+        base_fetch = http_via_proxy if mode.startswith("loopback") else http_direct
+        attempts = getattr(args, "retries", 1) + 1
+        jobs.append((site, host, base_fetch, attempts))
+
+    # 并行跑：35 个站点串行要 6 分钟以上（每个都可能等到超时），并行后大约一分钟。
+    # 单站点的重试在这个工作线程里完成，所以每个站点仍然最多 attempts 次。
+    def run_one(job):
+        site, host, base_fetch, attempts = job
+
+        def fetch(h, p_, t, _base=base_fetch, _n=attempts):
+            return fetch_with_retry(_base, h, p_, t, attempts=_n)
+
         result = fetch(host, args.path, args.timeout)
         label, detail = describe(site, result, args.timeout, fetch)
-        rows.append((site["name"], host, label, detail))
+        return (site["name"], host, label, detail)
+
+    rows = []
+    with concurrent.futures.ThreadPoolExecutor(max_workers=min(8, max(1, len(jobs)))) as pool:
+        rows = list(pool.map(run_one, jobs))
 
     width = max(len(r[0]) for r in rows) if rows else 8
     for name, host, label, detail in rows:
@@ -2574,7 +2610,140 @@ def describe_quic(entry: dict) -> str:
     return f"失败（{reason}）"
 
 
+
+# ---------------------------------------------------------------- 浏览器资源审计
+#
+# 为什么需要它：页面打不开时，"主站通"和"能正常渲染"是两件事。Chrome 会把 CSS、
+# JS、图片分散到 assets./static./files. 这些子域，其中任何一个被卡，页面就会退化成
+# 纯文字。这个自检把页面引用的域名逐个握手、再抽样下载真实资源，把"哪一层断了"
+# 变成一张表。
+
+def _fetch_page_text(url: str, timeout: float) -> tuple[int, str]:
+    """用浏览器 UA 取页面正文。返回 (状态码, 文本)。"""
+    req = urllib.request.Request(url, headers={
+        "User-Agent": ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                       "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"),
+        "Accept": "text/html,application/xhtml+xml,*/*;q=0.8",
+    })
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            raw = resp.read(2 * 1024 * 1024)
+            return resp.status, raw.decode("utf-8", "replace")
+    except urllib.error.HTTPError as exc:
+        return exc.code, ""
+    except Exception:
+        return 0, ""
+
+
+def _asset_hosts(html: str, base_url: str) -> list[str]:
+    """从页面里抽出引用到的外部域名（按出现顺序去重）。"""
+    import urllib.parse as _up
+    base = _up.urlsplit(base_url).hostname or ""
+    hosts = []
+    for m in re.finditer(r"""(?:https?:)?//([A-Za-z0-9.-]+\.[A-Za-z]{2,})""", html):
+        host = m.group(1).lower()
+        if host not in hosts:
+            hosts.append(host)
+    # 主站自己排最前，其余保持出现顺序
+    if base in hosts:
+        hosts.remove(base)
+        hosts.insert(0, base)
+    return hosts
+
+
+def _asset_urls(html: str, base_url: str, limit: int = 6) -> list[str]:
+    """抽几个真实的 CSS/JS/图片地址做下载抽样。"""
+    urls = []
+    for m in re.finditer(r'(?:href|src)="(https?://[^"]+\.(?:css|js|png|jpg|jpeg|webp|svg)[^"]*)"', html):
+        u = m.group(1)
+        if u not in urls:
+            urls.append(u)
+    return urls[:limit]
+
+
+def _tls_probe(host: str, timeout: float) -> tuple[str, str]:
+    """返回 (IP, 状态)。"""
+    try:
+        infos = socket.getaddrinfo(host, 443, socket.AF_INET, socket.SOCK_STREAM)
+        ips = sorted({ai[4][0] for ai in infos})
+    except Exception as exc:
+        return "-", f"解析失败({type(exc).__name__})"
+    ip = ips[0]
+    ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+    ctx.check_hostname = False
+    ctx.verify_mode = ssl.CERT_NONE
+    try:
+        raw = socket.create_connection((ip, 443), timeout=timeout)
+        with ctx.wrap_socket(raw, server_hostname=host) as ss:
+            return ip, f"OK({ss.version()})"
+    except Exception as exc:
+        return ip, type(exc).__name__
+
+
+def _asset_download(url: str, timeout: float) -> str:
+    req = urllib.request.Request(url, headers={
+        "User-Agent": ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                       "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"),
+    })
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            body = resp.read()
+            return f"{resp.status} {resp.headers.get('content-type', '?')} {len(body)}B"
+    except urllib.error.HTTPError as exc:
+        return f"{exc.code} {exc.reason}"
+    except Exception as exc:
+        return type(exc).__name__
+
+
+def browser_audit(url: str, timeout: float) -> int:
+    print(f"\n浏览器资源审计：{url}\n")
+    status, html = _fetch_page_text(url, timeout)
+    if status == 0:
+        print("  主站取不到（DNS/连接失败）。先确认这个域名本身可达。")
+        return 1
+    print(f"  主站       ：HTTP {status}，{len(html)} 字节")
+    if not html:
+        print("  页面为空，无法分析资源。")
+        return 1
+
+    hosts = _asset_hosts(html, url)[:15]
+    print(f"  引用域名   ：{len(hosts)} 个（最多列 15）\n")
+    print(f"  {'域名':<30} {'IP':<17} 直连 TLS")
+    print(f"  {'-' * 30} {'-' * 17} {'-' * 18}")
+    bad_hosts = []
+    for host in hosts:
+        ip, state = _tls_probe(host, timeout)
+        ok = state.startswith("OK")
+        if not ok:
+            bad_hosts.append(host)
+        print(f"  {host:<30} {ip:<17} {state}")
+
+    samples = _asset_urls(html, url, limit=6)
+    if samples:
+        print(f"\n  资源抽样（{len(samples)} 个）：")
+        print(f"  {'资源':<52} 结果")
+        for u in samples:
+            short = u.split("?")[0]
+            if len(short) > 50:
+                short = "…" + short[-49:]
+            print(f"  {short:<52} {_asset_download(u, timeout)}")
+
+    print()
+    if bad_hosts:
+        print(f"  结论：{len(bad_hosts)} 个域名握手失败 → {', '.join(bad_hosts[:5])}")
+        print("  这些域名的资源加载不到，页面就会退化成纯文字/无图。")
+        return 1
+    print("  结论：页面引用的域名全部可达。若浏览器仍显示纯文字，先强制刷新（Ctrl+Shift+R），"
+          "再看是不是 Cloudflare 挑战页或本地扩展拦截。")
+    return 0
+
+
 def cmd_check(args) -> None:
+    if getattr(args, "browser", None) is not None:
+        if not args.browser:
+            die("用法：sniroute.cmd check --browser <页面 URL>")
+        raise SystemExit(browser_audit(args.browser, args.browser_timeout))
+
     print(f"仓库根目录 : {ROOT}")
     print(f"管理员     : {'是' if is_admin() else '否（hosts / install-ca 需要）'}")
 
@@ -3067,6 +3236,9 @@ def main() -> None:
     p.set_defaults(func=cmd_check_site, quic=True, refresh_quic=False)
     p = sub.add_parser("check", help="环境自检")
     p.add_argument("--nginx")
+    p.add_argument("--browser", nargs="?", const="", metavar="URL",
+                   help="浏览器资源审计：抓页面、列出引用域名并逐个测可达性")
+    p.add_argument("--browser-timeout", type=float, default=10.0)
     p.set_defaults(func=cmd_check)
 
     p = sub.add_parser("hash", help="校验文件的 SHA-256 / SHA-1 / MD5 并与 sidecar 比对")
@@ -3077,6 +3249,8 @@ def main() -> None:
     p.add_argument("--site")
     p.add_argument("--path", default="/")
     p.add_argument("--timeout", type=float, default=20.0)
+    p.add_argument("--retries", type=int, default=1,
+                   help="单站点失败重试次数（默认 1，即最多试 2 次）")
     p.set_defaults(func=cmd_verify)
 
     p = sub.add_parser("discover", help="找候选 IP：DoH 查真实记录，或扩展已验证地址的同网段")

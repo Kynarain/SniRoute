@@ -1926,6 +1926,48 @@ QUIC(h3)   ：成功 0.22s
 输出里会注明这一点，不要把它当成"被墙"的铁证。
 
 
+
+## 浏览器资源审计与 verify 重试（3.19.2）
+
+### `check --browser`：页面引用了哪些域名、哪个断了
+
+页面"纯文字/无图"时，主站通常没问题，断的是 CSS/JS 所在的子域。这个自检会：
+抓页面 → 列出所有引用域名 → 逐个 TLS 握手 → 抽样下载真实资源。
+
+```powershell
+sniroute.cmd check --browser https://kick.com/
+```
+
+实测输出（节选）：
+
+```
+主站       ：HTTP 200，457905 字节
+引用域名   ：15 个（最多列 15）
+
+域名                             IP                直连 TLS
+kick.com                       162.159.235.122   OK(TLSv1.3)
+assets.kick.com                162.159.235.122   OK(TLSv1.3)
+www.datadoghq-browser-agent.com 3.175.215.186    ConnectionResetError
+...
+
+资源抽样（6 个）：
+…/chunks/0tw9m8n6cr864.css                        200 text/css 423893B
+…/chunks/0l-79ivcqp8t5.css                        200 text/css 9168B
+```
+
+一眼就能看出是"主站通但某个第三方资源域名被重置"。
+
+### `verify --retries`：消除概率性丢包造成的误报
+
+Steam/Akamai 的地址存在"同一 IP 一次成功、四次超时"的概率丢包。`verify` 现在：
+
+| 行为 | 说明 |
+|---|---|
+| 默认重试 1 次（最多 2 次尝试） | `--retries N` 可调 |
+| 只对连接失败 / 5xx 重试 | 4xx 是确定性结论，重试没意义 |
+| 并行验证（最多 8 路） | 35 个站点从 371 秒降到 71 秒 |
+
+
 ## 关于哈希文件（3.10.5 起）
 
 不再随产物生成 `.sha256` / `.sha1` / `.md5` 与 `SHA256SUMS.txt` / `SHA1SUMS.txt` / `MD5SUMS.txt`。
