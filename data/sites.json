@@ -982,6 +982,25 @@
         "hostname": "api.vrchat.cloud",
         "port": 443
       }
+    },
+    {
+      "name": "steam-login",
+      "service": "steam",
+      "url": "https://login.steampowered.com/",
+      "comment": "Steam 的登录/支付/帮助域名。实测同一个 login.steampowered.com 会解析到多组 Akamai 边缘 IP：23.35.x / 23.61.x 段 TLS 握手无响应（被丢包），23.37.x / 23.45.x 段正常。所以用 dns 模式——由 DoH 做 SNI 级探活，只把能完成 TLS 握手的地址返回给客户端，消除\"抽到坏 IP 就打不开\"的随机性。",
+      "enabled": true,
+      "dns_mode": "dns",
+      "cert_san": [],
+      "hosts": [
+        "login.steampowered.com",
+        "checkout.steampowered.com",
+        "help.steampowered.com",
+        "store.steampowered.com"
+      ],
+      "probe": {
+        "hostname": "login.steampowered.com",
+        "port": 443
+      }
     }
   ]
 }
