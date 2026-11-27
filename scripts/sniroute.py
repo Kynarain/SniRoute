@@ -2089,6 +2089,53 @@ def cmd_status(args) -> None:
 # --------------------------------------------------------------------------
 
 
+def http_direct(host: str, path: str = "/", timeout: float = 20.0) -> dict:
+    """直连目标做一次真实 HTTPS 请求（校验对方真证书）。
+
+    为什么需要：dns 模式的站点由 DoH 修正解析后**浏览器直连**，根本不经过本机
+    443。用 http_via_proxy 去验它们，只会撞上 nginx 的默认证书，报"本地证书不对"
+    —— 实测 27/35 个站点因此被误判为不可用。
+    """
+    hostname = host.split(":")[0]
+    port = int(host.split(":")[1]) if ":" in host else 443
+    ctx = ssl.create_default_context()
+    request = (f"GET {path} HTTP/1.1\r\n"
+               f"Host: {hostname}\r\n"
+               "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+               "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36\r\n"
+               "Accept: text/html,application/xhtml+xml,*/*;q=0.8\r\n"
+               "Connection: close\r\n\r\n")
+    try:
+        with socket.create_connection((hostname, port), timeout=timeout) as raw:
+            with ctx.wrap_socket(raw, server_hostname=hostname) as tls:
+                tls.sendall(request.encode())
+                buf = b""
+                while len(buf) < 262144:
+                    chunk = tls.recv(16384)
+                    if not chunk:
+                        break
+                    buf += chunk
+    except ssl.SSLCertVerificationError as exc:
+        return {"ok": False, "error": f"证书校验失败：{exc.reason}"}
+    except (socket.timeout, TimeoutError):
+        return {"ok": False, "error": "直连超时"}
+    except OSError as exc:
+        return {"ok": False, "error": f"连不上：{exc.strerror or exc}"}
+
+    head, _, body = buf.partition(b"\r\n\r\n")
+    lines = head.decode("latin-1", "replace").split("\r\n")
+    if not lines or not lines[0].startswith("HTTP/"):
+        return {"ok": False, "error": "不是 HTTP 响应"}
+    parts = lines[0].split()
+    code = int(parts[1]) if len(parts) > 1 and parts[1].isdigit() else 0
+    location = ""
+    for line in lines[1:]:
+        if line.lower().startswith("location:"):
+            location = line.split(":", 1)[1].strip()
+            break
+    return {"ok": True, "code": code, "size": len(body), "location": location}
+
+
 def http_via_proxy(
 host: str, path: str = "/", timeout: float = 20.0) -> dict:
     """经本机代理发一个真实 HTTPS 请求，返回状态行与字节数。
@@ -2166,7 +2213,7 @@ def verdict_of(result: dict) -> tuple:
     return "异常", f"HTTP {code}"
 
 
-def describe(site: dict, result: dict, timeout: float) -> tuple:
+def describe(site: dict, result: dict, timeout: float, fetch=None) -> tuple:
     """把一次请求的结果翻成结论；3xx 再跟一跳。
 
     只报"可跳转"是不够的：pixiv 主站就是 301 到 www.pixiv.net 然后 403，如果在这里
@@ -2176,7 +2223,8 @@ def describe(site: dict, result: dict, timeout: float) -> tuple:
     if result.get("ok") and 300 <= result["code"] < 400 and result.get("location"):
         target = urllib.parse.urlsplit(result["location"])
         if target.hostname:
-            follow = http_via_proxy(target.hostname, target.path or "/", timeout)
+            fetch_fn = fetch or http_via_proxy
+            follow = fetch_fn(target.hostname, target.path or "/", timeout)
             flabel, fdetail = verdict_of(follow)
             detail = f"→ {target.hostname}（{flabel}：{fdetail}）"
             if flabel not in ("可用",):
@@ -2197,18 +2245,34 @@ def cmd_verify(args) -> None:
         die("没有可验证的站点。")
 
     rows = []
+    skipped = []
     for site in sites:
-        host = site["hosts"][0] if site["hosts"] else site["probe"]["hostname"]
-        result = http_via_proxy(host, args.path, args.timeout)
-        label, detail = describe(site, result, args.timeout)
+        hosts = site.get("hosts") or []
+        probe = site.get("probe") or {}
+        if not hosts and not probe.get("hostname"):
+            # 纯菜单入口（youtube）和纯证书条目（relaycert）没有可访问的域名，
+            # 以前这里直接 site["probe"] 会 KeyError，把整个 verify 打断。
+            skipped.append(site.get("name", "?"))
+            continue
+        host = hosts[0] if hosts else probe["hostname"]
+        # 只有 loopback 类（本机终结 TLS）才该验本机 443。
+        # dns / ech 模式的浏览器都直连真实地址，用本机代理去验只会撞默认证书。
+        mode = site.get("dns_mode") or ""
+        fetch = http_via_proxy if mode.startswith("loopback") else http_direct
+        result = fetch(host, args.path, args.timeout)
+        label, detail = describe(site, result, args.timeout, fetch)
         rows.append((site["name"], host, label, detail))
 
-    width = max(len(r[0]) for r in rows)
+    width = max(len(r[0]) for r in rows) if rows else 8
     for name, host, label, detail in rows:
         print(f"  {name:<{width}}  {host:<22} {label:<8} {detail}")
+    if skipped:
+        print(f"  （跳过 {len(skipped)} 个无域名的条目：{', '.join(skipped)}）")
 
     bad = [r for r in rows if r[2] not in ("可用", "可跳转")]
     print()
+    if not rows:
+        die("没有可验证的域名（全是没有 hosts 的条目）。")
     if bad:
         print(f"{len(bad)}/{len(rows)} 个站点当前不可用。若上游刚变过，跑一次 probe；"
               f"若是 '被拒'，说明该站点要求 SNI —— 这条路对它不适用，"
