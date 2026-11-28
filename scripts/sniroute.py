@@ -2333,9 +2333,9 @@ def cmd_verify(args) -> None:
         if mode.startswith("loopback"):
             base_fetch = http_via_proxy
         elif mode == "ech":
-            # ech 站点的解析只有 DoH 可信：系统 DNS 会给出污染地址，
-            # 直接连过去必然超时，把能用的站点误报成故障。
-            base_fetch = lambda h, p_, t: http_direct(h, p_, t, use_doh=True)
+            # ech 站点必须由浏览器带着 ECH 内层 SNI 才能握手；我们这里只能发
+            # 明文 SNI，必然被 GFW 重置。所以不做请求，直接标成"需浏览器"。
+            base_fetch = None
         else:
             base_fetch = http_direct
         attempts = getattr(args, "retries", 1) + 1
@@ -2345,6 +2345,8 @@ def cmd_verify(args) -> None:
     # 单站点的重试在这个工作线程里完成，所以每个站点仍然最多 attempts 次。
     def run_one(job):
         site, host, base_fetch, attempts = job
+        if base_fetch is None:
+            return (site["name"], host, "需浏览器", "ECH 站点只能由浏览器验证（不发明文 SNI 就必被重置）")
 
         def fetch(h, p_, t, _base=base_fetch, _n=attempts):
             return fetch_with_retry(_base, h, p_, t, attempts=_n)
@@ -2363,7 +2365,7 @@ def cmd_verify(args) -> None:
     if skipped:
         print(f"  （跳过 {len(skipped)} 个无域名的条目：{', '.join(skipped)}）")
 
-    bad = [r for r in rows if r[2] not in ("可用", "可跳转")]
+    bad = [r for r in rows if r[2] not in ("可用", "可跳转", "需浏览器")]
     print()
     if not rows:
         die("没有可验证的域名（全是没有 hosts 的条目）。")
