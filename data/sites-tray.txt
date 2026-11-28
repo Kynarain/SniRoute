@@ -6,7 +6,7 @@ dropbox|https://www.dropbox.com/
 ea|https://www.ea.com/
 github|https://github.com/
 google|https://www.google.com/
-grok|https://grok.com/
+hltv|https://www.hltv.org/
 mega|https://mega.nz/
 modio|https://mod.io/
 modrinth|https://modrinth.com/
@@ -17,6 +17,4 @@ pixiv|https://www.pixiv.net/
 roblox|https://www.roblox.com/
 steam|https://store.steampowered.com/
 twitch|https://www.twitch.tv/
-vrchat|https://www.vrchat.com/
 x|https://x.com/
-youtube|https://www.youtube.com/

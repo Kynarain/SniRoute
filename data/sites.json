@@ -242,16 +242,6 @@
       "loopback_ip": "127.0.0.1"
     },
     {
-      "name": "youtube",
-      "service": "youtube",
-      "url": "https://www.youtube.com/",
-      "comment": "菜单入口。YouTube 的域名实际由 google 站点统一接管（同一套上游地址池与证书），这里只登记一个可点击的入口，不重复声明 hosts，避免两处同时映射。",
-      "enabled": true,
-      "dns_mode": "loopback",
-      "cert_san": [],
-      "hosts": []
-    },
-    {
       "name": "steam",
       "service": "steam",
       "url": "https://store.steampowered.com/",
@@ -882,45 +872,6 @@
       "probe_sni": "twimg.twitter.map.fastly.net"
     },
     {
-      "name": "grok",
-      "service": "grok",
-      "url": "https://grok.com/",
-      "comment": "Grok 与 xAI。精确 SNI 在 27-40 毫秒内被重置、不带 SNI 又会被 Cloudflare 拒绝，所以走 loopback 并在上游发送带根点的 SNI（grok.com. / x.ai.）；Host 保持原样。CF 按 SNI 分区，SNI 与 Host 不同名会 403。",
-      "enabled": true,
-      "dns_mode": "loopback",
-      "cert_san": [
-        "grok.com",
-        "*.grok.com",
-        "x.ai",
-        "*.x.ai"
-      ],
-      "hosts": [
-        "grok.com",
-        "www.grok.com",
-        "x.ai",
-        "www.x.ai",
-        "accounts.x.ai",
-        "docs.x.ai",
-        "console.x.ai",
-        "status.x.ai",
-        "grok.x.ai",
-        "cdn.grok.com",
-        "files.grok.com",
-        "assets.grok.com"
-      ],
-      "candidates": [
-        "104.18.28.234",
-        "104.18.29.234",
-        "104.18.18.80"
-      ],
-      "upstream_file": "conf/upstreams/grok.list",
-      "probe": {
-        "hostname": "grok.com",
-        "port": 443
-      },
-      "probe_sni": "$host."
-    },
-    {
       "name": "openai",
       "service": "openai",
       "url": "https://openai.com/",
@@ -942,48 +893,6 @@
       }
     },
     {
-      "name": "vrchat",
-      "service": "vrchat",
-      "url": "https://www.vrchat.com/",
-      "comment": "VRChat 官网。实测三件坏事同时成立：(1) alidns 对 vrchat.com 返回 108.160.x（错误/投毒）；(2) 带正确 SNI 连真实 CF IP，3 个 IP × 3 次全部 RST；(3) 该 CF 区的 HTTPS 记录只有 h2——没有 ECH、没有 h3。所以 DNS 修好之后浏览器仍然会被 RST：官网只能靠隧道访问（WARP/VPS）。保留这个条目是为了修正解析（有些客户端会先查官网域名）。",
-      "enabled": true,
-      "dns_override": true,
-      "dns_mode": "dns",
-      "cert_san": [],
-      "hosts": [
-        "vrchat.com",
-        "www.vrchat.com"
-      ],
-      "probe": {
-        "hostname": "www.vrchat.com",
-        "port": 443
-      },
-      "candidates": [
-        "104.18.6.156",
-        "104.18.7.156"
-      ]
-    },
-    {
-      "name": "vrchat-api",
-      "service": "vrchat",
-      "url": "https://vrchat.com/home",
-      "comment": "VRChat 客户端实际用的 API 与资源域名。实测这三个都能直连：api.vrchat.cloud（SNI 正常、解析正确）、files.vrchat.cloud（CloudFront，SNI 正常且证书对得上，alidns 给的 3.175.x 也能用）。所以游戏客户端本身不依赖本工具；这里只做 DNS 兜底，防止解析被投毒。注意：游戏内实时流量走 UDP（Photon），不经过本工具。",
-      "enabled": true,
-      "dns_mode": "dns",
-      "cert_san": [],
-      "hosts": [
-        "api.vrchat.cloud",
-        "files.vrchat.cloud",
-        "assets.vrchat.cloud",
-        "dds.vrchat.cloud",
-        "vrchat.cloud"
-      ],
-      "probe": {
-        "hostname": "api.vrchat.cloud",
-        "port": 443
-      }
-    },
-    {
       "name": "steam-login",
       "service": "steam",
       "url": "https://login.steampowered.com/",
@@ -999,6 +908,25 @@
       ],
       "probe": {
         "hostname": "login.steampowered.com",
+        "port": 443
+      }
+    },
+    {
+      "name": "hltv",
+      "service": "hltv",
+      "url": "https://www.hltv.org/",
+      "comment": "HLTV（CS 赛事与新闻）。实测：Cloudflare 前置、无 ECH、有 h3、带 SNI 的 TLS 正常，DNS 也未被投毒。curl 直接访问会 403（Cloudflare 拦 UA），浏览器正常打开。所以用 dns 模式，只做解析兜底与可达性过滤，不做代理、不需要本机证书。",
+      "enabled": true,
+      "dns_mode": "dns",
+      "cert_san": [],
+      "hosts": [
+        "hltv.org",
+        "www.hltv.org",
+        "static.hltv.org",
+        "img-cdn.hltv.org"
+      ],
+      "probe": {
+        "hostname": "www.hltv.org",
         "port": 443
       }
     }
