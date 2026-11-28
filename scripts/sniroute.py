@@ -58,6 +58,14 @@ DOH_INTERNAL_PORT = 5454
 # speaks plain DNS only). Port 53 is what NRPT accepts.
 PLAIN_DNS_PORT = 53
 DOH_LOG = ROOT / "logs" / "doh.log"
+
+# 日志轮转：每次组件重启时，把上一份日志压成 zip 放到 logs/archive/，
+# 然后让组件重新创建同名文件。保留最近 N 份，避免 archive 无限膨胀。
+LOG_ARCHIVE_DIR = ROOT / "logs" / "archive"
+NGINX_ACCESS_LOG = ROOT / "logs" / "access.log"
+NGINX_ERROR_LOG = ROOT / "logs" / "error.log"
+LOG_ARCHIVE_KEEP = 10
+
 DOH_SCRIPT = ROOT / "tools" / "doh_ech.py"
 
 # discover 的产出。和 sites.json 分开：前者是机器测出来的临时结果，后者是人写的
@@ -740,6 +748,7 @@ def cmd_service(args) -> None:
             print("清理残留 pid 文件")
             pid_file.unlink()
         (ROOT / "logs").mkdir(parents=True, exist_ok=True)
+        rotate_logs([NGINX_ACCESS_LOG, NGINX_ERROR_LOG], reason="nginx 重启")
         # nginx 在 Windows 上会占住控制台，所以脱离启动
         subprocess.Popen(nginx_cmd(nginx), cwd=str(ROOT),
                          stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
@@ -833,6 +842,42 @@ def cmd_stats(args) -> None:
 # --------------------------------------------------------------------------
 # DoH 子进程
 # --------------------------------------------------------------------------
+
+
+
+def rotate_logs(paths, keep: int = LOG_ARCHIVE_KEEP, reason: str = "") -> list:
+    """把已有日志压成 zip 存进 logs/archive/，删掉原文件（下次写入自动新建）。
+
+    为什么在重启时做：日志文件被运行中的进程持有，Windows 上无法删除/改名。
+    所以在启动新实例之前、旧实例已经退出的时刻轮转，才不会撞上共享冲突。
+    """
+    import zipfile
+    LOG_ARCHIVE_DIR.mkdir(parents=True, exist_ok=True)
+    stamp = time.strftime("%Y%m%d-%H%M%S")
+    moved = []
+    for path in paths:
+        try:
+            if not path.is_file() or path.stat().st_size == 0:
+                continue
+            archive = LOG_ARCHIVE_DIR / f"{path.stem}-{stamp}.zip"
+            with zipfile.ZipFile(archive, "w", zipfile.ZIP_DEFLATED) as zf:
+                zf.write(path, arcname=path.name)
+            path.unlink()
+            moved.append(archive)
+        except OSError:
+            # 文件被占用（例如 nginx 还在跑）就跳过，不因此让启动失败
+            continue
+    # 每类日志只留最近的 keep 份
+    for family in {p_.stem for p_ in paths}:
+        olds = sorted(LOG_ARCHIVE_DIR.glob(f"{family}-*.zip"))
+        for old in olds[:-keep]:
+            try:
+                old.unlink()
+            except OSError:
+                pass
+    if moved and reason:
+        print(f"  日志已归档（{reason}）：" + ", ".join(m.name for m in moved))
+    return moved
 
 
 def port_listener_pid(port: int) -> int | None:
@@ -939,6 +984,7 @@ def cmd_doh(args) -> None:
     if not DOH_SCRIPT.is_file():
         die(f"缺少 {DOH_SCRIPT}")
     (ROOT / "logs").mkdir(parents=True, exist_ok=True)
+    rotate_logs([DOH_LOG], reason="DoH 重启")
     subprocess.Popen(
         [sys.executable, str(DOH_SCRIPT), "--listen", f"127.0.0.1:{DOH_INTERNAL_PORT}",
          "--no-tls", "--log", str(DOH_LOG), "--dns-port", str(PLAIN_DNS_PORT)],
@@ -2089,7 +2135,7 @@ def cmd_status(args) -> None:
 # --------------------------------------------------------------------------
 
 
-def http_direct(host: str, path: str = "/", timeout: float = 20.0) -> dict:
+def http_direct(host: str, path: str = "/", timeout: float = 20.0, use_doh: bool = False) -> dict:
     """直连目标做一次真实 HTTPS 请求（校验对方真证书）。
 
     为什么需要：dns 模式的站点由 DoH 修正解析后**浏览器直连**，根本不经过本机
@@ -2105,8 +2151,13 @@ def http_direct(host: str, path: str = "/", timeout: float = 20.0) -> dict:
                "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36\r\n"
                "Accept: text/html,application/xhtml+xml,*/*;q=0.8\r\n"
                "Connection: close\r\n\r\n")
+    connect_host = hostname
+    if use_doh:
+        ips = _doh_a_records(hostname, timeout)
+        if ips:
+            connect_host = ips[0]
     try:
-        with socket.create_connection((hostname, port), timeout=timeout) as raw:
+        with socket.create_connection((connect_host, port), timeout=timeout) as raw:
             with ctx.wrap_socket(raw, server_hostname=hostname) as tls:
                 tls.sendall(request.encode())
                 buf = b""
@@ -2279,7 +2330,14 @@ def cmd_verify(args) -> None:
         # 只有 loopback 类（本机终结 TLS）才该验本机 443。
         # dns / ech 模式的浏览器都直连真实地址，用本机代理去验只会撞默认证书。
         mode = site.get("dns_mode") or ""
-        base_fetch = http_via_proxy if mode.startswith("loopback") else http_direct
+        if mode.startswith("loopback"):
+            base_fetch = http_via_proxy
+        elif mode == "ech":
+            # ech 站点的解析只有 DoH 可信：系统 DNS 会给出污染地址，
+            # 直接连过去必然超时，把能用的站点误报成故障。
+            base_fetch = lambda h, p_, t: http_direct(h, p_, t, use_doh=True)
+        else:
+            base_fetch = http_direct
         attempts = getattr(args, "retries", 1) + 1
         jobs.append((site, host, base_fetch, attempts))
 
@@ -2693,6 +2751,46 @@ def _asset_download(url: str, timeout: float) -> str:
         return f"{exc.code} {exc.reason}"
     except Exception as exc:
         return type(exc).__name__
+
+
+def _doh_a_records(name: str, timeout: float) -> list:
+    """问本机 DoH（:5444）要 A 记录。ech 模式站点的解析只有 DoH 才可信。"""
+    import struct as _struct
+    query = _struct.pack(">HHHHHH", 0x4D4D, 0x0100, 1, 0, 0, 0)
+    query += b"".join(bytes([len(part)]) + part.encode() for part in name.strip(".").split("."))
+    query += b"\x00" + _struct.pack(">HH", 1, 1)
+    req = urllib.request.Request("https://127.0.0.1:5444/dns-query", data=query,
+                                 headers={"content-type": "application/dns-message",
+                                          "accept": "application/dns-message"})
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            buf = resp.read()
+    except Exception:
+        return []
+    if len(buf) < 12:
+        return []
+    an = int.from_bytes(buf[6:8], "big")
+    pos = 12
+    while pos < len(buf) and buf[pos] != 0:
+        pos += 1 + buf[pos]
+    pos += 5
+    ips = []
+    for _ in range(an):
+        if pos + 10 > len(buf):
+            break
+        if buf[pos] & 0xC0:
+            pos += 2
+        else:
+            while pos < len(buf) and buf[pos] != 0:
+                pos += 1 + buf[pos]
+            pos += 1
+        rtype = int.from_bytes(buf[pos:pos + 2], "big")
+        rdlen = int.from_bytes(buf[pos + 8:pos + 10], "big")
+        rdata = buf[pos + 10:pos + 10 + rdlen]
+        pos += 10 + rdlen
+        if rtype == 1 and rdlen == 4:
+            ips.append(".".join(str(x) for x in rdata))
+    return ips
 
 
 def browser_audit(url: str, timeout: float) -> int:

@@ -45,6 +45,10 @@ from http.server import BaseHTTPRequestHandler
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
+import threading
+import time as _time_mod
+import os as _os_mod
+
 ROOT = Path(__file__).resolve().parent.parent
 SITES = ROOT / "data" / "sites.json"
 ECH_CFG = ROOT / "data" / "cloudflare-ech.json"
@@ -314,6 +318,36 @@ def emit(msg: str) -> None:
 
 
 
+
+# ---------------------------------------------------------------- 过滤统计
+#
+# doh.log 以前每条过滤事件刷一行，文件很快到 MB 级，而"整体健康度"根本看不出来。
+# 这里把三类结果计数，按周期汇总成一行 [stats]，重启时再写一次最终值。
+_FILTER_STATS = {"queries": 0, "filtered": 0, "fallback_none": 0, "fallback_cold": 0}
+_STATS_LOCK = threading.Lock()
+
+
+def _stats_bump(key: str, n: int = 1) -> None:
+    with _STATS_LOCK:
+        _FILTER_STATS[key] = _FILTER_STATS.get(key, 0) + n
+
+
+def emit_stats(tag: str) -> None:
+    with _STATS_LOCK:
+        snapshot = dict(_FILTER_STATS)
+    emit(f"[stats] {tag} 查询={snapshot['queries']} 剔除={snapshot['filtered']} "
+         f"回退(全失败)={snapshot['fallback_none']} 回退(冷启动)={snapshot['fallback_cold']}")
+
+
+def _stats_loop(interval: float) -> None:
+    while True:
+        _time_mod.sleep(interval)
+        try:
+            emit_stats("周期")
+        except Exception:
+            pass
+
+
 def _tcp_ok(ip: str, port: int, timeout: float) -> bool:
     try:
         with socket.create_connection((ip, port), timeout=timeout):
@@ -413,6 +447,7 @@ def _filter_reachable(query: bytes, qend: int, answer: bytes, timeout: float = 3
             tcp_hits = [ip for ip, ok in pool2.map(
                 lambda ip: (ip, _tcp_ok(str(ip), 443, min(1.6, timeout))), ips) if ok]
         if tcp_hits:
+            _stats_bump("fallback_cold")
             emit(f"[dns] TLS 全超时，但 {len(tcp_hits)} 个地址 TCP 可达，按冷启动处理返回")
             return build_response(query, qend, [(TYPE_A, ipaddress.IPv4Address(ip).packed, 60)
                                                for ip in tcp_hits])
@@ -421,8 +456,10 @@ def _filter_reachable(query: bytes, qend: int, answer: bytes, timeout: float = 3
         # 网络抖动。把启发式失败当成"域名不存在"，会把一个本来能用的站点彻底打死
         # —— 实测 github.com 就因此变成 ERR_NAME_NOT_RESOLVED，连仓库都创建不了。
         # 真不可达时让客户端自己超时，至少域名还是活的。
+        _stats_bump("fallback_none")
         emit(f"[dns] {len(ips)} 个地址都没通过探活，回退为返回原始答案（不做剔除）")
         return answer
+    _stats_bump("filtered")
     emit(f"[dns] {len(ips)} 个地址中 {len(ips) - len(good)} 个不可达，已剔除")
     return build_response(query, qend, [(TYPE_A, ip.packed, 60) for ip in good])
 
@@ -517,6 +554,7 @@ def answer_query(query: bytes, plain: bool = False) -> bytes:
     name, qtype, qclass, qend = parse_question(query)
     key = name.lower().rstrip(".")
 
+    _stats_bump("queries")
     entry = UPSTREAM_TABLE.get(key)
     if entry is None:
         # 尝试后缀匹配（*.pximg.net → 任何子域）
@@ -795,6 +833,16 @@ def main() -> None:
     ECH = load_ech()
     UPSTREAM_TABLE = load_upstreams()
     LOG_PATH = args.log
+
+    # 过滤统计：周期汇总一行，退出时再写最终值。
+    try:
+        _stats_interval = float(_os_mod.environ.get("DOH_STATS_INTERVAL", "300"))
+    except ValueError:
+        _stats_interval = 300.0
+    threading.Thread(target=_stats_loop, args=(max(2.0, _stats_interval),),
+                     name="doh-stats", daemon=True).start()
+    import atexit as _atexit
+    _atexit.register(lambda: emit_stats("退出"))
 
     # 启动时先把 Cloudflare 的共享 ECH 配置取好。懒加载会让重启后的第一个
     # 查询多等一次远端往返，浏览器有时等不及就直接失败（实测 5 次里第 1 次挂）。
